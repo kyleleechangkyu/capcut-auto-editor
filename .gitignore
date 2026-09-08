@@ -1,0 +1,21 @@
+# 파이썬 환경 / 캐시
+.venv/
+__pycache__/
+*.py[cod]
+
+# 이 컴퓨터에서만 의미 있는 것들
+settings.json          # 앱 화면에서 고른 설정 (사람마다 다름)
+media/                 # 드래그해서 넣은 원본 영상
+work/                  # 전사 캐시 · 리포트 · SRT 등 작업 산출물
+testdrafts/            # 테스트용 가짜 CapCut 초안
+
+# 맥 / 에디터
+.DS_Store
+.vscode/
+.idea/
+
+# 배포 아카이브 · 임시
+*.tar.gz
+_old/
+.tmp_extract/
+Claude outputs/

@@ -1,0 +1,98 @@
+# CapCut 자동 편집기 — 작업 안내
+
+이 저장소에서 작업할 때 먼저 읽어주세요.
+
+## 이게 뭔가
+
+영상 하나를 넣으면 컷 편집(무음·말더듬·재촬영 제거)과 자막을 얹은
+**CapCut 초안(draft)** 을 만들어주는 로컬 앱입니다. 완성 영상이 아니라 초안을
+만드는 게 핵심 — 사용자가 CapCut에서 열어 손보고 직접 내보냅니다.
+
+## 실행
+
+```bash
+# 설치 + 실행 (맥)
+open "CapCut 자동편집기.command"
+
+# 개발 중에는 서버만
+source .venv/bin/activate && python3 app/server.py
+```
+
+브라우저가 `http://127.0.0.1:8756/` 로 열립니다.
+
+## 구조
+
+```
+CapCut 자동편집기.command   더블클릭 진입점. 첫 실행 시 venv + 패키지 설치
+app/server.py              stdlib HTTP 서버. 127.0.0.1 전용. API + 정적 HTML
+app/ui.html                단일 화면 앱. 외부 의존성 없음 (Inter 웹폰트만)
+agent/audio.py             ffmpeg/ffprobe 래퍼 — 메타데이터, wav 추출, silencedetect
+agent/transcribe.py        faster-whisper 단어 단위 전사 + JSON 캐시
+agent/detect.py            컷 판정 엔진 + 원본↔편집본 타임라인 매핑
+agent/subtitles.py         자막 줄 나누기 + SRT
+agent/draft.py             CapCut draft_content.json 생성 + 견본 스타일 복제
+agent/defaults.py          기본값 + 프리셋 (컷 세기 / 정확도 / 비율)
+agent/config.py            settings.json 병합, CapCut 초안 폴더 자동 탐색
+agent/pipeline.py          전체 흐름 + 단계별 진행 콜백
+DESIGN-framer.md           UI 디자인 시스템 명세 (토큰의 출처)
+```
+
+## 반드시 알아야 할 설계 제약
+
+**1. 자막 스타일은 코드로 만들지 않는다**
+CapCut의 텍스트 템플릿·말풍선·花字·애니메이션은 CapCut 서버의 리소스 ID를 참조하므로
+코드로 생성할 수 없습니다. 대신 사용자가 CapCut에서 만든 **견본 초안**의 텍스트 조각을
+`agent/draft.py: scan_seed()` 로 통째로 읽어와 `_clone_text_segment()` 로 복제합니다.
+새 UUID를 부여하고 글자와 시간만 교체합니다. 이 구조를 우회하려 하지 마세요.
+
+**2. 견본에서 CapCut 버전 정보를 물려받는다**
+`_finalize()` 가 견본의 `platform` / `version` / `new_version` 을 그대로 씁니다.
+CapCut이 업데이트돼 스키마가 바뀌어도 견본만 새로 만들면 대응됩니다.
+
+**3. 사유별로 컷 여백이 다르다**
+무음 컷에만 `lead_in`/`lead_out` 여백을 줍니다. 말더듬·재촬영은 이미 단어·문장
+경계라서 여백을 주면 잘린 조각("두" 같은 한 글자)이 남습니다. `detect.build_plan()` 참고.
+
+**4. 자막 시각은 반드시 재매핑한다**
+컷 후 자막 시간이 어긋나므로 `CutPlan.map_span()` 으로 원본→편집본 변환을 거칩니다.
+컷 경계에 55% 미만만 걸친 단어는 조각이므로 버립니다 (`subtitles.build_cues`).
+
+**5. pymediainfo 를 쓰지 않는다**
+pycapcut의 `VideoMaterial` 이 libmediainfo를 요구하지만, 설치 부담을 줄이려고
+`draft._ffprobe_material()` 에서 ffprobe 결과로 객체를 직접 구성합니다.
+
+**6. 초안은 영상 파일의 절대 경로를 기억한다**
+`media/` 안의 영상을 옮기거나 지우면 CapCut에서 링크가 끊깁니다.
+원본을 이동시키는 코드를 추가할 때는 초안 생성 **전에** 옮겨야 합니다.
+
+## UI 작업 규칙
+
+`DESIGN-framer.md` 가 디자인 시스템의 단일 출처입니다. `app/ui.html` 의 `:root` 에
+토큰이 그대로 들어가 있습니다. 새 요소를 만들 때:
+
+- 색은 반드시 토큰(`var(--surface-1)` 등)으로. 하드코딩 금지.
+- 위계는 `canvas → surface-1 → surface-2` 표면 단계로. 흰 글자의 투명도로 만들지 말 것.
+- 텍스트 색은 `--ink` 아니면 `--ink-muted` 둘 중 하나. 중간 회색 추가 금지.
+- CTA는 알약(`--r-pill`). 테두리만 있는 고스트 버튼 쓰지 말 것.
+- `--accent-blue` 는 링크·포커스·선택 표시 전용. 배경이나 버튼 채우기로 쓰지 말 것.
+- 그라디언트는 **카드**에만. 섹션 배경으로 깔지 말 것. 한 화면에 하나까지.
+- 한글 디스플레이 트래킹은 -3%(`-0.03em`)까지만. 원 명세의 -5%는 한글 자소가 뭉칩니다.
+
+## 테스트
+
+whisper 없이 파이프라인을 검증하려면 전사 캐시를 직접 넣으면 됩니다:
+
+```python
+from agent.transcribe import Utterance, Word, save_cache
+save_cache(Path('work/<영상이름>/transcript.json'), utterances)
+```
+
+`work/<영상이름>/transcript.json` 이 있으면 전사를 건너뜁니다.
+가짜 견본 초안은 `testdrafts/` 아래에 draft_content.json 을 만들어 쓰면 됩니다.
+
+## 하지 말 것
+
+- CapCut UI 자동화(클릭 조작)로 방향을 틀지 마세요. 앱 업데이트마다 깨집니다.
+- 사용자에게 터미널 명령이나 설정 파일 편집을 요구하는 기능을 추가하지 마세요.
+  이 앱은 그걸 없애려고 만든 것입니다. 설정은 화면에서.
+- `settings.json`, `media/`, `work/` 를 커밋하지 마세요 (.gitignore에 있음).

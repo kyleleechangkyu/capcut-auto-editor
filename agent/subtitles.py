@@ -1,0 +1,125 @@
+"""편집본 타임라인 기준 자막 생성."""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import List, Sequence
+
+from .detect import CutPlan
+from .transcribe import Utterance
+
+_TRAILING_PUNCT = re.compile(r"[.,!?…·]+$")
+_MULTISPACE = re.compile(r"\s+")
+
+
+@dataclass
+class Cue:
+    start: float
+    end: float
+    text: str
+
+    @property
+    def duration(self) -> float:
+        return max(0.0, self.end - self.start)
+
+
+def _clean(text: str, strip_punct: bool) -> str:
+    t = _MULTISPACE.sub(" ", (text or "").strip())
+    if strip_punct:
+        t = _TRAILING_PUNCT.sub("", t).strip()
+    return t
+
+
+def build_cues(
+    utterances: Sequence[Utterance],
+    plan: CutPlan,
+    *,
+    max_chars: int = 15,
+    min_duration: float = 0.7,
+    max_duration: float = 4.0,
+    strip_punctuation: bool = True,
+) -> List[Cue]:
+    """발화를 편집본 타임라인으로 옮기고 한 줄 길이에 맞춰 쪼갭니다."""
+    cues: List[Cue] = []
+
+    for utt in utterances:
+        # 잘려나가지 않고 살아남은 단어만 모읍니다
+        mapped = []
+        for w in utt.words:
+            span = plan.map_span(w.start, w.end)
+            if span is None:
+                continue
+            # 컷 경계에 반쯤 걸린 단어는 조각으로 남으므로 버립니다
+            original = max(1e-6, w.end - w.start)
+            if (span[1] - span[0]) / original < 0.55:
+                continue
+            mapped.append((span[0], span[1], w.text))
+
+        if not mapped:
+            # 단어 타임스탬프가 없는 경우 발화 단위로 처리
+            span = plan.map_span(utt.start, utt.end)
+            if span is None:
+                continue
+            text = _clean(utt.text, strip_punctuation)
+            if text:
+                cues.append(Cue(span[0], span[1], text))
+            continue
+
+        # 한 줄 글자 수에 맞춰 묶기
+        line: List[tuple] = []
+        for item in mapped:
+            candidate = _clean(
+                " ".join([w[2] for w in line] + [item[2]]), strip_punctuation
+            )
+            too_long = len(candidate.replace(" ", "")) > max_chars
+            # 편집 컷을 건너뛴 경우(시간이 크게 튐)에도 줄을 끊습니다
+            jumped = bool(line) and (item[0] - line[-1][1]) > 0.6
+
+            if line and (too_long or jumped):
+                cues.append(_make_cue(line, strip_punctuation))
+                line = []
+            line.append(item)
+
+        if line:
+            cues.append(_make_cue(line, strip_punctuation))
+
+    cues = [c for c in cues if c.text]
+    cues.sort(key=lambda c: c.start)
+
+    # 길이 보정 + 겹침 제거
+    for i, c in enumerate(cues):
+        if c.duration < min_duration:
+            c.end = c.start + min_duration
+        if c.duration > max_duration:
+            c.end = c.start + max_duration
+        if i + 1 < len(cues):
+            nxt_start = cues[i + 1].start
+            if c.end > nxt_start - 0.04:
+                c.end = max(c.start + 0.25, nxt_start - 0.04)
+
+    return [c for c in cues if c.duration > 0.1]
+
+
+def _make_cue(line: List[tuple], strip_punct: bool) -> Cue:
+    text = _clean(" ".join(w[2] for w in line), strip_punct)
+    return Cue(line[0][0], line[-1][1], text)
+
+
+def _srt_time(t: float) -> str:
+    t = max(0.0, t)
+    h, rem = divmod(t, 3600)
+    m, s = divmod(rem, 60)
+    ms = int(round((s - int(s)) * 1000))
+    if ms >= 1000:
+        ms, s = 0, int(s) + 1
+    return f"{int(h):02d}:{int(m):02d}:{int(s):02d},{ms:03d}"
+
+
+def write_srt(cues: Sequence[Cue], path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        for i, c in enumerate(cues, 1):
+            fh.write(f"{i}\n{_srt_time(c.start)} --> {_srt_time(c.end)}\n{c.text}\n\n")
+    return path
