@@ -87,8 +87,30 @@ pycapcut의 `VideoMaterial` 이 libmediainfo를 요구하지만, 설치 부담�
 `draft._ffprobe_material()` 에서 ffprobe 결과로 객체를 직접 구성합니다.
 
 **6. 초안은 영상 파일의 절대 경로를 기억한다**
-`media/` 안의 영상을 옮기거나 지우면 CapCut에서 링크가 끊깁니다.
+`media_dir` 안의 영상을 옮기거나 지우면 CapCut에서 링크가 끊깁니다.
 원본을 이동시키는 코드를 추가할 때는 초안 생성 **전에** 옮겨야 합니다.
+
+**7. macOS의 CapCut은 App 샌드박스로 실행된다 — 영상은 반드시 `~/Movies` 아래에**
+`~/Desktop`, `~/Documents`, `~/Downloads` 아래 파일은 CapCut이 읽지 못합니다
+(초안은 열리지만 클립마다 "액세스할 수 없습니다"가 뜸). 커널 로그에
+`Sandbox: CapCut deny(1) file-read-data <path>` 로 남으니, 의심되면
+`log show --last 15m --predicate 'eventMessage CONTAINS "<파일명>"'` 로 확인하세요
+(zsh에서 `log`는 내장 명령과 충돌하니 `/usr/bin/log` 로 직접 불러야 합니다).
+그래서 `config.py: Config.media_dir` 가 macOS에서 `~/Movies` 아래를 씁니다 —
+이 경로를 다시 앱 폴더 밑으로 되돌리지 마세요.
+
+**8. 새 초안을 만들 땐 실제 CapCut 초안을 스캐폴드로 통째로 복제한다**
+pycapcut의 `create_draft()` 는 `draft_content.json`/`draft_meta_info.json` 만
+만드는데, 이 CapCut 버전은 그 외에도 `draft_info.json`(주 콘텐츠 파일 — 이게
+없으면 목록엔 뜨지만 열 때 "프로젝트를 사용할 수 없음"), `Resources/`,
+`draft_virtual_store.json` 등 많은 부속 파일을 요구합니다. `draft.build()` 가
+`scaffold_dir`(자막 견본 또는 `find_scaffold()`가 고른 기존 초안)를
+`shutil.copytree` 로 통째로 복제한 뒤 콘텐츠 파일만 덮어쓰는 이유입니다.
+단, 복제된 `Timelines/project.json` 은 견본 자신의 `main_timeline_id` 를
+그대로 담고 있어서 재생기가 우리 콘텐츠 대신 견본의 옛 타임라인을 가리키게
+됩니다 (편집 화면은 `draft_content.json`을 직접 읽어 정상으로 보이니 착각하기
+쉽습니다) — 그래서 복제 직후 `Timelines/` 를 통째로 지웁니다. CapCut이 열 때
+`draft_content.json` 기준으로 새로 만들어 줍니다.
 
 ## UI 작업 규칙
 
