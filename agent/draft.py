@@ -309,6 +309,14 @@ def build(
             stale_path = draft_dir / stale
             if stale_path.exists():
                 stale_path.unlink()
+        # Timelines/project.json 은 견본의 main_timeline_id 를 그대로 담고 있어서
+        # 재생기(플레이어)가 우리가 쓴 새 콘텐츠 대신 견본의 (이제는 없는) 타임라인을
+        # 가리키게 된다 — 편집 화면은 draft_content.json 을 직접 읽어 정상으로 보이지만
+        # 재생은 안 되는 원인이었다. CapCut이 열 때 draft_content.json 기준으로 새로
+        # 만들도록 통째로 지운다.
+        stale_timelines = draft_dir / "Timelines"
+        if stale_timelines.exists():
+            shutil.rmtree(stale_timelines)
 
     # ---- 이 컴퓨터에 맞게 마무리 ----
     _finalize(content, draft_dir, draft_name, timeline, seed)
