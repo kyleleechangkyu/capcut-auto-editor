@@ -202,10 +202,16 @@ def _list_drafts(cfg) -> List[Dict[str, Any]]:
         return []
     items = []
     for p in Path(drafts).iterdir():
-        if not p.is_dir() or not (p / "draft_content.json").exists():
+        if not p.is_dir():
+            continue
+        # CapCut 버전에 따라 draft_content.json 또는 draft_info.json 을 씁니다.
+        content_file = p / "draft_content.json"
+        if not content_file.exists():
+            content_file = p / "draft_info.json"
+        if not content_file.exists():
             continue
         try:
-            mtime = (p / "draft_content.json").stat().st_mtime
+            mtime = content_file.stat().st_mtime
         except OSError:
             mtime = 0
         items.append({"name": p.name, "mtime": mtime})

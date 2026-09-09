@@ -65,10 +65,13 @@ def scan_seed(draft_dir: Path) -> SeedStyle:
 
     견본에는 텍스트가 최소 한 개 있어야 합니다.
     """
+    # CapCut 버전에 따라 draft_content.json 또는 draft_info.json 을 씁니다.
     content_path = draft_dir / "draft_content.json"
     if not content_path.exists():
+        content_path = draft_dir / "draft_info.json"
+    if not content_path.exists():
         raise FileNotFoundError(
-            f"견본 초안에 draft_content.json 이 없습니다: {draft_dir}\n"
+            f"견본 초안에 draft_content.json / draft_info.json 이 없습니다: {draft_dir}\n"
             "CapCut에서 초안을 열고 아무 편집이나 한 뒤 저장해 주세요."
         )
 
@@ -236,6 +239,7 @@ def build(
     fit: str = "cover",
     seed: Optional[SeedStyle] = None,
     subtitle_cfg: Optional[Dict[str, Any]] = None,
+    scaffold_dir: Optional[Path] = None,
 ) -> BuildResult:
     from pycapcut import DraftFolder, VideoSegment, Timerange, TrackType
 
@@ -292,12 +296,27 @@ def build(
         content = _inject_seed_subtitles(content, seed, cues)
         style_note = f"견본 스타일 사용 ({seed.description})"
 
-    # ---- 이 컴퓨터에 맞게 마무리 ----
+    # ---- CapCut이 실제로 요구하는 부속 파일을 진짜 초안에서 통째로 가져옵니다 ----
+    # pycapcut의 create_draft() 는 draft_content.json / draft_meta_info.json 만 만드는데,
+    # 최신 CapCut은 draft_info.json 을 비롯해 Resources/, Timelines/, draft_virtual_store.json 등
+    # 훨씬 많은 파일을 요구한다. 그게 없으면 목록엔 뜨지만 열 때 "프로젝트를 사용할 수 없음"
+    # 오류가 난다. 실제 초안(seed 또는 다른 기존 초안) 폴더를 스캐폴드로 통째로 복제한 뒤
+    # 콘텐츠 파일만 우리가 만든 것으로 덮어써서 이 문제를 피한다.
     draft_dir = drafts_dir / draft_name
+    if scaffold_dir and scaffold_dir.is_dir() and scaffold_dir.resolve() != draft_dir.resolve():
+        shutil.copytree(scaffold_dir, draft_dir, dirs_exist_ok=True)
+        for stale in ("draft_cover.jpg", "template-2.tmp"):
+            stale_path = draft_dir / stale
+            if stale_path.exists():
+                stale_path.unlink()
+
+    # ---- 이 컴퓨터에 맞게 마무리 ----
     _finalize(content, draft_dir, draft_name, timeline, seed)
 
-    with open(draft_dir / "draft_content.json", "w", encoding="utf-8") as fh:
-        json.dump(content, fh, ensure_ascii=False, indent=2)
+    raw = json.dumps(content, ensure_ascii=False, indent=2)
+    for fname in ("draft_content.json", "draft_info.json", "draft_info.json.bak"):
+        with open(draft_dir / fname, "w", encoding="utf-8") as fh:
+            fh.write(raw)
 
     return BuildResult(
         draft_dir=draft_dir,
@@ -404,6 +423,31 @@ def _finalize(
 
 
 # ---------------------------------------------------------------- 유틸
+
+def find_scaffold(drafts_dir: Path, *, exclude: str = "") -> Optional[Path]:
+    """구조 복제용으로 쓸 실제 CapCut 초안을 하나 고릅니다 (자막 견본과 무관).
+
+    자막 스타일 견본을 고르지 않았을 때도 CapCut이 요구하는 부속 파일이
+    필요하므로, 가장 최근에 쓰인 실제 초안을 스캐폴드로 씁니다.
+    """
+    if not drafts_dir.is_dir():
+        return None
+    candidates = []
+    for p in drafts_dir.iterdir():
+        if not p.is_dir() or p.name == exclude:
+            continue
+        if not ((p / "draft_info.json").exists() or (p / "draft_content.json").exists()):
+            continue
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            mtime = 0
+        candidates.append((mtime, p))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda x: -x[0])
+    return candidates[0][1]
+
 
 def resolve_drafts_dir(configured: str) -> Path:
     from .config import find_capcut_drafts

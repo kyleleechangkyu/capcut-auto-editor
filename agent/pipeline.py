@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -63,6 +65,18 @@ def process(
     p = progress or Progress()
     t0 = time.time()
     video = Path(video).resolve()
+
+    # '파일 선택'으로 media_dir 바깥의 영상을 골랐다면 CapCut이 읽지 못하는
+    # 위치일 수 있으므로 (macOS 샌드박스 — media_dir 참고) media_dir 로 복사해
+    # 초안이 접근 가능한 경로를 기억하게 한다. 드래그로 넣은 영상은 서버가
+    # 이미 media_dir 에 저장해 두므로 다시 복사하지 않는다.
+    if sys.platform == "darwin" and video.parent != cfg.media_dir:
+        dest = cfg.media_dir / video.name
+        if dest.exists() and dest.resolve() != video.resolve():
+            dest = cfg.media_dir / f"{video.stem}-{int(time.time())}{video.suffix}"
+        if not (dest.exists() and dest.resolve() == video.resolve()):
+            shutil.copy2(video, dest)
+        video = dest
 
     job = cfg.work_dir / video.stem
     job.mkdir(parents=True, exist_ok=True)
@@ -179,13 +193,19 @@ def process(
     drafts_dir = draft.resolve_drafts_dir(str(cfg.get("capcut_drafts") or ""))
 
     seed = None
+    scaffold_dir = None
     seed_name = str(cfg.get("seed_draft") or "")
     if seed_name and (drafts_dir / seed_name).is_dir():
+        scaffold_dir = drafts_dir / seed_name
         try:
             seed = draft.scan_seed(drafts_dir / seed_name)
             p.log(f"자막 스타일: {seed.description}")
         except (ValueError, FileNotFoundError) as exc:
             p.log(f"견본을 못 읽어 기본 스타일로 갑니다 — {exc}")
+    if scaffold_dir is None:
+        # 자막 견본을 고르지 않았어도 CapCut이 요구하는 부속 파일은 필요하므로
+        # 기존 초안 아무거나 하나를 구조 복제용 스캐폴드로 쓴다.
+        scaffold_dir = draft.find_scaffold(drafts_dir)
 
     d = cfg.get_path("draft", {}) or {}
     width = int(d.get("width", 1080)) or info.width
@@ -211,6 +231,7 @@ def process(
         fit=str(d.get("fit", "auto")),
         seed=seed,
         subtitle_cfg=sub,
+        scaffold_dir=scaffold_dir,
     )
     p.stage("draft", built.draft_name, 1.0)
 

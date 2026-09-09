@@ -70,8 +70,18 @@ class Config(dict):
 
     @property
     def media_dir(self) -> Path:
-        """드래그해서 넣은 영상이 보관되는 곳 (초안이 이 경로를 기억합니다)."""
-        p = APP_ROOT / "media"
+        """드래그해서 넣은 영상이 보관되는 곳 (초안이 이 경로를 기억합니다).
+
+        macOS의 CapCut은 App 샌드박스로 실행돼 ~/Desktop, ~/Documents, ~/Downloads
+        같은 보호된 폴더 아래 파일을 읽지 못한다 (초안은 열려도 클립이
+        "액세스할 수 없음"으로 뜸 — 커널 로그에 `Sandbox: CapCut deny file-read-data`
+        로 남는다). 앱을 어디에 두든 이 문제를 피하도록, CapCut 자신도 데이터를
+        저장하는 ~/Movies 아래에 영상을 보관한다.
+        """
+        if sys.platform == "darwin":
+            p = Path.home() / "Movies" / "CapCut 자동편집기 미디어"
+        else:
+            p = APP_ROOT / "media"
         p.mkdir(parents=True, exist_ok=True)
         return p
 
