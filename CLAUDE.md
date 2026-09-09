@@ -2,6 +2,31 @@
 
 이 저장소에서 작업할 때 먼저 읽어주세요.
 
+> **git 잠금 파일 주의**: `.git/HEAD.lock` 이나 `index.lock` 이 남아 있으면 커밋이 실패합니다.
+> (샌드박스에서 작업하다 생긴 것. 맥에서는 `rm -f .git/*.lock` 으로 지우면 됩니다)
+> 마지막 CLAUDE.md 수정분은 이 문제로 커밋되지 않은 채 작업트리에 있습니다 — 그냥 커밋하면 됩니다.
+
+## 첫 작업: 설치부터 (아직 안 돼 있음)
+
+`.venv` 가 없으면 아직 한 번도 설치되지 않은 상태입니다. 다른 걸 하기 전에 먼저:
+
+```bash
+cd "$(dirname "$0")"          # 이 저장소 폴더
+bash "CapCut 자동편집기.command"
+```
+
+- ffmpeg(brew), python venv, faster-whisper, pycapcut 을 순서대로 깝니다. 5~10분.
+- 모든 출력이 `install.log` 에 남습니다. 실패하면 그 파일부터 보세요.
+- 끝나면 브라우저가 `http://127.0.0.1:8756/` 로 열립니다.
+
+설치 후 확인할 것:
+1. 화면 우상단 상태 칩이 "준비됨" 인지 (ffmpeg / whisper / pycapcut / CapCut 초안 폴더 4개 점검)
+2. CapCut 초안 폴더를 못 찾으면 `agent/config.py` 의 `MAC_DRAFT_CANDIDATES` 에
+   실제 경로를 추가하세요. 맥에서 `ls ~/Movies | grep -i capcut` 으로 찾을 수 있습니다.
+3. 실제 영상 하나로 돌려보고 `work/<이름>/report.md` 로 컷 판정 검토
+
+---
+
 ## 이게 뭔가
 
 영상 하나를 넣으면 컷 편집(무음·말더듬·재촬영 제거)과 자막을 얹은
