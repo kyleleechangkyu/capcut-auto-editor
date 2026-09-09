@@ -19,3 +19,7 @@ testdrafts/            # 테스트용 가짜 CapCut 초안
 _old/
 .tmp_extract/
 Claude outputs/
+
+# 실행 로그
+install.log
+app.log

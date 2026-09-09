@@ -6,6 +6,16 @@
 # ─────────────────────────────────────────────
 cd "$(dirname "$0")" || exit 1
 
+# ── 모든 출력을 install.log 에 남깁니다 ──────────
+# (문제가 생겼을 때 Claude가 이 파일을 읽고 바로 진단할 수 있게)
+LOG="$(pwd)/install.log"
+: > "$LOG"
+exec > >(tee -a "$LOG") 2>&1
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 시작"
+echo "PATH=$PATH"
+echo "shell=$BASH_VERSION  arch=$(uname -m)"
+echo "----------------------------------------------"
+
 BOLD=$'\033[1m'; DIM=$'\033[2m'; RST=$'\033[0m'
 GRN=$'\033[32m'; RED=$'\033[31m'; YLW=$'\033[33m'
 
