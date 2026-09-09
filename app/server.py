@@ -346,7 +346,9 @@ class Handler(BaseHTTPRequestHandler):
             with JOBS_LOCK:
                 job = JOBS.get(jid)
             if not job:
-                self._json({"error": "no such job"}, 404)
+                # 키 이름을 따로 둡니다. job.snapshot() 에도 error 필드가 있어서
+                # 같은 이름을 쓰면 '작업 실패'와 '작업 없음'이 구분되지 않습니다.
+                self._json({"not_found": True, "error": "no such job"}, 404)
                 return
             self._json(job.snapshot())
             return

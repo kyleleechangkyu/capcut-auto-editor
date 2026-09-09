@@ -39,7 +39,9 @@ def probe(path: Path) -> MediaInfo:
         "-show_format", "-show_streams", str(path),
     ])
     if res.returncode != 0:
-        raise RuntimeError(f"ffprobe 실패: {path.name}\n{res.stderr.strip()}")
+        raise RuntimeError(
+            f"'{path.name}' 을 열지 못했습니다. 파일이 손상됐거나 지원하지 않는 형식입니다."
+        )
 
     data = json.loads(res.stdout)
     streams = data.get("streams", [])
@@ -47,7 +49,7 @@ def probe(path: Path) -> MediaInfo:
     audio = next((s for s in streams if s.get("codec_type") == "audio"), None)
 
     if video is None:
-        raise RuntimeError(f"영상 트랙이 없습니다: {path.name}")
+        raise RuntimeError(f"'{path.name}' 에는 영상이 들어 있지 않습니다.")
 
     # 회전 메타데이터가 있으면 가로/세로를 뒤집어 실제 보이는 크기를 씁니다
     width = int(video.get("width", 0))
@@ -89,7 +91,9 @@ def extract_wav(src: Path, dst: Path, sample_rate: int = 16000) -> Path:
         str(dst),
     ])
     if res.returncode != 0:
-        raise RuntimeError(f"오디오 추출 실패: {src.name}\n{res.stderr.strip()}")
+        raise RuntimeError(
+            f"'{src.name}' 에서 소리를 꺼내지 못했습니다. 다른 형식으로 내보낸 뒤 다시 시도해 주세요."
+        )
     return dst
 
 
