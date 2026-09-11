@@ -70,6 +70,21 @@ CapCut의 텍스트 템플릿·말풍선·花字·애니메이션은 CapCut 서�
 `agent/draft.py: scan_seed()` 로 통째로 읽어와 `_clone_text_segment()` 로 복제합니다.
 새 UUID를 부여하고 글자와 시간만 교체합니다. 이 구조를 우회하려 하지 마세요.
 
+기본값(화면에서 견본을 안 골랐을 때)은 `agent/assets/default_text_style.json` 에
+미리 뽑아 저장해 둔 스타일 — `draft.default_text_style()` 가 읽어서 씁니다. 사용자가
+CapCut의 "텍스트 사전 설정"으로 만들어 실제 프로젝트에 적용해 둔 스타일을 한 번 뽑아
+고정해 둔 것(원본 CapCut 프로젝트가 지워져도 남아있음). 기본 스타일을 바꾸려면 그
+프로젝트에서 `scan_seed()` 를 다시 돌려 이 파일을 덮어쓰면 됩니다 — 방법은
+`git log`에서 이 자산을 처음 만든 커밋 참고.
+
+**1-1. scan_seed() 는 draft_info.json 을 draft_content.json 보다 먼저 본다**
+이 CapCut은 draft_info.json 만 실제로 계속 갱신합니다. draft_content.json 은 (우리
+도구가 그 초안을 처음 만들 때 썼다면) 그 시점의 낡은 스냅샷으로 남아있습니다.
+사용자가 CapCut 안에서 자막 스타일을 직접 고쳐서 견본으로 쓰려는 게 일반적인
+시나리오이므로, 스타일을 놓치지 않으려면 draft_info.json 을 우선해야 합니다
+(반대로 뒀다가 그림자·커스텀 폰트가 통째로 빠진 채 복제된 적 있음). 이 순서를
+다시 뒤집지 마세요 — `_list_drafts()` (app/server.py)도 마찬가지.
+
 **2. 견본에서 CapCut 버전 정보를 물려받는다**
 `_finalize()` 가 견본의 `platform` / `version` / `new_version` 을 그대로 씁니다.
 CapCut이 업데이트돼 스키마가 바뀌어도 견본만 새로 만들면 대응됩니다.
