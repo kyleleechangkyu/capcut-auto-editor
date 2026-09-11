@@ -114,19 +114,44 @@ class CutPlan:
 
 # ---------------------------------------------------------------- 감지기
 
-def find_silence_cuts(
-    spans: Sequence[Tuple[float, float]], *, keep_padding: float, min_duration: float
+def find_nonspeech_cuts(
+    utterances: Sequence[Utterance], duration: float, *, min_duration: float = 0.12
 ) -> List[Cut]:
-    """무음 구간에서 여백만 남기고 잘라낼 부분을 만듭니다."""
+    """말이 인식된 구간만 남기고 그 사이를 전부 잘라냅니다.
+
+    dB 기준 무음 감지와 달리 '얼마나 조용한가'가 아니라 '말이 실제로 인식됐는가'가
+    기준이라, 조용하지 않지만 말이 아닌 소리(마이크 부시럭거림·숨소리·헛기침·배경
+    잡음)도 함께 잘려나갑니다. 앞뒤 여백은 여기서 주지 않고 `build_plan`의
+    `lead_in`/`lead_out` 이 담당합니다(숨 쉴 틈은 있게).
+    """
+    # 단어 하나하나를 남길 구간으로 씁니다 (발화 전체가 아니라). whisper는 짧은
+    # 틈(< 300ms)을 같은 발화로 묶어버리므로, 발화 단위로 보면 문장 안쪽의
+    # 숨쉬는 틈·마이크 잡음을 놓칩니다. min_duration 이 어느 틈까지 자를지를
+    # 정합니다 — 너무 작게 잡으면 말이 뚝뚝 끊겨 들리니 프리셋으로 조절합니다.
+    spans: List[Tuple[float, float]] = []
+    for u in utterances:
+        words = [w for w in u.words if normalize(w.text)]
+        if words:
+            spans.extend((w.start, w.end) for w in words)
+        elif normalize(u.text):
+            spans.append((u.start, u.end))
+    spans.sort()
+
+    merged: List[Tuple[float, float]] = []
+    for s, e in spans:
+        if merged and s <= merged[-1][1] + 1e-6:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], e))
+        else:
+            merged.append((s, e))
+
     cuts: List[Cut] = []
-    for start, end in spans:
-        if end - start < min_duration:
-            continue
-        # 앞뒤로 keep_padding 만큼은 숨 쉴 틈으로 남겨둡니다
-        s = start + keep_padding
-        e = end - keep_padding
-        if e - s > 0.05:
-            cuts.append(Cut(s, e, "silence", f"{end - start:.2f}초 무음"))
+    cursor = 0.0
+    for s, e in merged:
+        if s - cursor >= min_duration:
+            cuts.append(Cut(cursor, s, "silence", f"{s - cursor:.2f}초 비발화 구간"))
+        cursor = max(cursor, e)
+    if duration - cursor >= min_duration:
+        cuts.append(Cut(cursor, duration, "silence", f"{duration - cursor:.2f}초 비발화 구간"))
     return cuts
 
 

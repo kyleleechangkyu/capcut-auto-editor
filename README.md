@@ -47,7 +47,7 @@ CapCut의 텍스트 템플릿·말풍선·애니메이션은 코드로 만들 �
 CapCut 자동편집기.command   ← 이것만 더블클릭
 app/server.py              로컬 앱 서버
 app/ui.html                화면
-agent/audio.py             ffmpeg — 오디오 추출, 무음 감지
+agent/audio.py             ffmpeg — 오디오 추출, 영상 정보
 agent/transcribe.py        음성 인식 (faster-whisper) + 캐시
 agent/detect.py            컷 판정 + 타임라인 재계산
 agent/subtitles.py         자막 줄 나누기 + SRT

@@ -125,18 +125,13 @@ def process(
 
     sil = cut_cfg.get("silence", {}) or {}
     if sil.get("enabled", True):
-        spans = audio.detect_silence(
-            wav,
-            threshold_db=float(sil.get("threshold_db", -34)),
-            min_duration=float(sil.get("min_duration", 0.45)),
-        )
-        found = detect.find_silence_cuts(
-            spans,
-            keep_padding=float(sil.get("keep_padding", 0.12)),
-            min_duration=float(sil.get("min_duration", 0.45)),
+        found = detect.find_nonspeech_cuts(
+            utterances,
+            info.duration,
+            min_duration=float(sil.get("min_duration", 0.12)),
         )
         cuts += found
-        p.log(f"무음 {len(found)}곳")
+        p.log(f"무음/비발화 {len(found)}곳")
 
     st = cut_cfg.get("stutter", {}) or {}
     if st.get("enabled", True):

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import json
-import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 
 class FFmpegMissing(RuntimeError):
@@ -95,44 +94,6 @@ def extract_wav(src: Path, dst: Path, sample_rate: int = 16000) -> Path:
             f"'{src.name}' 에서 소리를 꺼내지 못했습니다. 다른 형식으로 내보낸 뒤 다시 시도해 주세요."
         )
     return dst
-
-
-_SIL_START = re.compile(r"silence_start:\s*(-?[\d.]+)")
-_SIL_END = re.compile(r"silence_end:\s*(-?[\d.]+)")
-
-
-def detect_silence(
-    wav: Path, threshold_db: float = -34.0, min_duration: float = 0.45
-) -> List[Tuple[float, float]]:
-    """ffmpeg silencedetect 로 (시작, 끝) 무음 구간 목록을 얻습니다."""
-    res = _run([
-        "ffmpeg", "-v", "info", "-i", str(wav),
-        "-af", f"silencedetect=noise={threshold_db}dB:d={min_duration}",
-        "-f", "null", "-",
-    ])
-    # silencedetect 결과는 stderr로 나옵니다
-    log = res.stderr or ""
-
-    spans: List[Tuple[float, float]] = []
-    pending: float | None = None
-    for line in log.splitlines():
-        m = _SIL_START.search(line)
-        if m:
-            pending = max(0.0, float(m.group(1)))
-            continue
-        m = _SIL_END.search(line)
-        if m and pending is not None:
-            end = float(m.group(1))
-            if end > pending:
-                spans.append((pending, end))
-            pending = None
-
-    if pending is not None:  # 파일 끝까지 무음인 경우
-        total = duration_of(wav)
-        if total > pending:
-            spans.append((pending, total))
-
-    return spans
 
 
 def duration_of(path: Path) -> float:

@@ -51,7 +51,7 @@ source .venv/bin/activate && python3 app/server.py
 CapCut 자동편집기.command   더블클릭 진입점. 첫 실행 시 venv + 패키지 설치
 app/server.py              stdlib HTTP 서버. 127.0.0.1 전용. API + 정적 HTML
 app/ui.html                단일 화면 앱. 외부 의존성 없음 (Inter 웹폰트만)
-agent/audio.py             ffmpeg/ffprobe 래퍼 — 메타데이터, wav 추출, silencedetect
+agent/audio.py             ffmpeg/ffprobe 래퍼 — 메타데이터, wav 추출
 agent/transcribe.py        faster-whisper 단어 단위 전사 + JSON 캐시
 agent/detect.py            컷 판정 엔진 + 원본↔편집본 타임라인 매핑
 agent/subtitles.py         자막 줄 나누기 + SRT
@@ -77,6 +77,14 @@ CapCut이 업데이트돼 스키마가 바뀌어도 견본만 새로 만들면 �
 **3. 사유별로 컷 여백이 다르다**
 무음 컷에만 `lead_in`/`lead_out` 여백을 줍니다. 말더듬·재촬영은 이미 단어·문장
 경계라서 여백을 주면 잘린 조각("두" 같은 한 글자)이 남습니다. `detect.build_plan()` 참고.
+
+**3-1. "무음"은 dB가 아니라 발화 인식 여부로 판단한다**
+`detect.find_nonspeech_cuts()` 는 ffmpeg의 dB 기준 `silencedetect` 를 쓰지 않습니다.
+whisper가 단어를 인식한 구간(가능하면 단어 타임스탬프, 없으면 발화 구간)만 "말"로
+보고 그 사이를 전부 잘라냅니다 — 조용하지 않아도 말이 아니면(마이크 부시럭거림,
+숨소리, 배경 잡음) 잘려나갑니다. `cut.silence.min_duration` 은 이제 "dB 임계값"이
+아니라 "이보다 짧은 비발화 틈은 안 자름" 기준입니다. 여백은 여기서 주지 않고
+`build_plan()`의 `lead_in`/`lead_out`(제약 3)이 담당하므로 이중으로 패딩하지 마세요.
 
 **4. 자막 시각은 반드시 재매핑한다**
 컷 후 자막 시간이 어긋나므로 `CutPlan.map_span()` 으로 원본→편집본 변환을 거칩니다.

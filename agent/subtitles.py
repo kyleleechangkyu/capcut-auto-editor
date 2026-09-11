@@ -89,15 +89,19 @@ def build_cues(
     cues.sort(key=lambda c: c.start)
 
     # 길이 보정 + 겹침 제거
+    # 다음 자막 시작 전까지가 절대 상한(hard_cap) — 컷이 촘촘해 자막이
+    # 빽빽하게 붙어 있을 때 min_duration 을 채우려다 다음 자막을 침범해
+    # CapCut에 "세그먼트 겹침" 오류를 내지 않도록, 늘릴 땐 이 상한을 넘지 않는다.
     for i, c in enumerate(cues):
-        if c.duration < min_duration:
-            c.end = c.start + min_duration
         if c.duration > max_duration:
             c.end = c.start + max_duration
-        if i + 1 < len(cues):
-            nxt_start = cues[i + 1].start
-            if c.end > nxt_start - 0.04:
-                c.end = max(c.start + 0.25, nxt_start - 0.04)
+        hard_cap = cues[i + 1].start - 0.04 if i + 1 < len(cues) else float("inf")
+        if c.duration < min_duration and hard_cap > c.start:
+            c.end = min(c.start + min_duration, hard_cap)
+        if c.end > hard_cap:
+            c.end = hard_cap
+        if c.end < c.start:
+            c.end = c.start
 
     return [c for c in cues if c.duration > 0.1]
 

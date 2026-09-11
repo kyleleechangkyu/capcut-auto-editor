@@ -15,9 +15,7 @@ DEFAULTS = {
     "cut": {
         "silence": {
             "enabled": True,
-            "threshold_db": -34,
-            "min_duration": 0.45,
-            "keep_padding": 0.12,
+            "min_duration": 0.12,  # 이보다 짧은 비발화 틈은 굳이 안 자름
         },
         "stutter": {
             "enabled": True,
@@ -61,18 +59,21 @@ DEFAULTS = {
 PRESETS = {
     "cut_strength": {
         "loose": {  # 여유롭게 — 말맛을 살림
-            "cut.silence.min_duration": 0.7,
-            "cut.silence.keep_padding": 0.20,
+            "cut.silence.min_duration": 0.35,
+            "cut.lead_in": 0.12,
+            "cut.lead_out": 0.20,
             "cut.retake.similarity": 0.85,
         },
         "normal": {
-            "cut.silence.min_duration": 0.45,
-            "cut.silence.keep_padding": 0.12,
+            "cut.silence.min_duration": 0.15,
+            "cut.lead_in": 0.08,
+            "cut.lead_out": 0.14,
             "cut.retake.similarity": 0.72,
         },
-        "tight": {  # 촘촘하게 — 릴스처럼 빠르게
-            "cut.silence.min_duration": 0.30,
-            "cut.silence.keep_padding": 0.06,
+        "tight": {  # 촘촘하게 — 말 사이 틈을 거의 다 잘라냄
+            "cut.silence.min_duration": 0.06,
+            "cut.lead_in": 0.04,
+            "cut.lead_out": 0.08,
             "cut.retake.similarity": 0.65,
         },
     },
