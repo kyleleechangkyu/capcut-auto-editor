@@ -123,6 +123,10 @@ def find_nonspeech_cuts(
     기준이라, 조용하지 않지만 말이 아닌 소리(마이크 부시럭거림·숨소리·헛기침·배경
     잡음)도 함께 잘려나갑니다. 앞뒤 여백은 여기서 주지 않고 `build_plan`의
     `lead_in`/`lead_out` 이 담당합니다(숨 쉴 틈은 있게).
+
+    단, whisper의 단어 타임스탬프가 항상 정확하진 않아서 실제로 조용한 구간도
+    앞뒤 단어에 넉넉하게 걸쳐 보고하는 경우가 있다 — 이런 건 여기서 못 잡으므로
+    `find_silence_cuts()`(dB 기준)를 보완으로 같이 쓴다 (pipeline.py 참고).
     """
     # 단어 하나하나를 남길 구간으로 씁니다 (발화 전체가 아니라). whisper는 짧은
     # 틈(< 300ms)을 같은 발화로 묶어버리므로, 발화 단위로 보면 문장 안쪽의
@@ -152,6 +156,21 @@ def find_nonspeech_cuts(
         cursor = max(cursor, e)
     if duration - cursor >= min_duration:
         cuts.append(Cut(cursor, duration, "silence", f"{duration - cursor:.2f}초 비발화 구간"))
+    return cuts
+
+
+def find_silence_cuts(
+    spans: Sequence[Tuple[float, float]], *, min_duration: float = 0.3
+) -> List[Cut]:
+    """dB 기준으로 찾은 무음 구간을 컷으로 바꿉니다 (find_nonspeech_cuts 의 보완용).
+
+    여백은 여기서 주지 않습니다 — build_plan 의 lead_in/lead_out 이 "silence"
+    사유 컷에 공통으로 적용하므로 이중으로 주지 않도록.
+    """
+    cuts: List[Cut] = []
+    for start, end in spans:
+        if end - start >= min_duration:
+            cuts.append(Cut(start, end, "silence", f"{end - start:.2f}초 무음(dB)"))
     return cuts
 
 

@@ -125,11 +125,15 @@ def process(
 
     sil = cut_cfg.get("silence", {}) or {}
     if sil.get("enabled", True):
-        found = detect.find_nonspeech_cuts(
-            utterances,
-            info.duration,
-            min_duration=float(sil.get("min_duration", 0.12)),
+        min_dur = float(sil.get("min_duration", 0.12))
+        found = detect.find_nonspeech_cuts(utterances, info.duration, min_duration=min_dur)
+        # whisper의 단어 타임스탬프가 실제 침묵을 옆 단어에 넉넉하게 걸쳐
+        # 보고하는 경우가 있어 (그러면 위 방법으론 못 잡음), dB 기준으로
+        # 한 번 더 훑어 보완한다 (agent/detect.py: find_nonspeech_cuts 참고).
+        db_spans = audio.detect_silence(
+            wav, threshold_db=float(sil.get("threshold_db", -34)), min_duration=min_dur
         )
+        found += detect.find_silence_cuts(db_spans, min_duration=min_dur)
         cuts += found
         p.log(f"무음/비발화 {len(found)}곳")
 

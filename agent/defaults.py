@@ -16,6 +16,7 @@ DEFAULTS = {
         "silence": {
             "enabled": True,
             "min_duration": 0.12,  # 이보다 짧은 비발화 틈은 굳이 안 자름
+            "threshold_db": -34,   # dB 보완 감지 임계값 (find_silence_cuts 참고)
         },
         "stutter": {
             "enabled": True,
