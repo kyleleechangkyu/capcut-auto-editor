@@ -44,12 +44,18 @@ def build_cues(
 
     글자 수로 쪼개지 않습니다 — CapCut 자체가 박스 안에서 줄바꿈을 해 주므로,
     여기서 미리 잘게 쪼개면 오히려 사용자가 직접 다시 이어붙여야 합니다.
-    """
-    cues: List[Cue] = []
 
+    whisper의 발화(utterance) 경계로도 쪼개지 않습니다. 컷 편집이 촘촘하면
+    원래 서로 다른 발화였던 것들이 사이의 무음/비발화 구간이 통째로 잘려나가
+    편집본에서는 바로 붙어버립니다 — 그런데도 발화 단위로 나누면 뻔히 이어지는
+    말인데 자막만 뚝뚝 끊깁니다. 그래서 모든 발화의 단어를 시간순으로 한 줄로
+    모은 뒤, 편집본 기준으로 실제로 끊기거나(시간이 크게 튐) 너무 길어질 때만
+    나눕니다.
+    """
+    # 잘려나가지 않고 살아남은 단어만, 발화 구분 없이 시간순으로 모읍니다
+    mapped: List[tuple] = []
     for utt in utterances:
-        # 잘려나가지 않고 살아남은 단어만 모읍니다
-        mapped = []
+        utt_mapped = []
         for w in utt.words:
             span = plan.map_span(w.start, w.end)
             if span is None:
@@ -58,31 +64,35 @@ def build_cues(
             original = max(1e-6, w.end - w.start)
             if (span[1] - span[0]) / original < 0.55:
                 continue
-            mapped.append((span[0], span[1], w.text))
+            utt_mapped.append((span[0], span[1], w.text))
 
-        if not mapped:
-            # 단어 타임스탬프가 없는 경우 발화 단위로 처리
+        if utt_mapped:
+            mapped.extend(utt_mapped)
+        else:
+            # 단어 타임스탬프가 없는 경우 발화 전체를 한 덩어리로 넣습니다
             span = plan.map_span(utt.start, utt.end)
             if span is None:
                 continue
             text = _clean(utt.text, strip_punctuation)
             if text:
-                cues.append(Cue(span[0], span[1], text))
-            continue
+                mapped.append((span[0], span[1], text))
 
-        # 컷으로 끊기거나(시간이 크게 튐) 너무 길어지는 경우에만 자막을 나눕니다.
-        line: List[tuple] = []
-        for item in mapped:
-            jumped = bool(line) and (item[0] - line[-1][1]) > 0.6
-            too_long = bool(line) and (item[1] - line[0][0]) > max_duration
+    mapped.sort(key=lambda item: item[0])
 
-            if line and (jumped or too_long):
-                cues.append(_make_cue(line, strip_punctuation))
-                line = []
-            line.append(item)
+    # 컷으로 끊기거나(편집본에서 시간이 크게 튐) 너무 길어지는 경우에만 자막을 나눕니다.
+    cues: List[Cue] = []
+    line: List[tuple] = []
+    for item in mapped:
+        jumped = bool(line) and (item[0] - line[-1][1]) > 0.6
+        too_long = bool(line) and (item[1] - line[0][0]) > max_duration
 
-        if line:
+        if line and (jumped or too_long):
             cues.append(_make_cue(line, strip_punctuation))
+            line = []
+        line.append(item)
+
+    if line:
+        cues.append(_make_cue(line, strip_punctuation))
 
     cues = [c for c in cues if c.text]
     cues.sort(key=lambda c: c.start)
