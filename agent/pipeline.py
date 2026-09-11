@@ -179,7 +179,6 @@ def process(
         cues = subtitles.build_cues(
             utterances,
             plan,
-            min_duration=float(sub.get("min_duration", 0.7)),
             max_duration=float(sub.get("max_duration", 4.0)),
             strip_punctuation=bool(sub.get("strip_punctuation", True)),
         )

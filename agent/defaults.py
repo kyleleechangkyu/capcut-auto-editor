@@ -38,7 +38,6 @@ DEFAULTS = {
 
     "subtitle": {
         "enabled": True,
-        "min_duration": 0.7,
         "max_duration": 4.0,
         "strip_punctuation": True,
         "position_y": 0.78,
