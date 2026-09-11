@@ -175,7 +175,6 @@ def process(
         cues = subtitles.build_cues(
             utterances,
             plan,
-            max_chars=int(sub.get("max_chars", 15)),
             min_duration=float(sub.get("min_duration", 0.7)),
             max_duration=float(sub.get("max_duration", 4.0)),
             strip_punctuation=bool(sub.get("strip_punctuation", True)),
@@ -197,6 +196,11 @@ def process(
             p.log(f"자막 스타일: {seed.description}")
         except (ValueError, FileNotFoundError) as exc:
             p.log(f"견본을 못 읽어 기본 스타일로 갑니다 — {exc}")
+    if seed is None:
+        # 화면에서 견본을 따로 고르지 않았으면 앱에 저장된 기본 자막 스타일을 씁니다.
+        seed = draft.default_text_style()
+        if seed:
+            p.log(f"자막 스타일: {seed.description} (기본값)")
     if scaffold_dir is None:
         # 자막 견본을 고르지 않았어도 CapCut이 요구하는 부속 파일은 필요하므로
         # 기존 초안 아무거나 하나를 구조 복제용 스캐폴드로 쓴다.

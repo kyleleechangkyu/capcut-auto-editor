@@ -37,7 +37,6 @@ DEFAULTS = {
 
     "subtitle": {
         "enabled": True,
-        "max_chars": 15,
         "min_duration": 0.7,
         "max_duration": 4.0,
         "strip_punctuation": True,

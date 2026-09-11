@@ -60,15 +60,48 @@ def _load_json(path: Path) -> Dict[str, Any]:
         return json.load(fh)
 
 
+_ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+_DEFAULT_TEXT_STYLE_PATH = _ASSETS_DIR / "default_text_style.json"
+
+
+def default_text_style() -> Optional[SeedStyle]:
+    """사용자가 견본 초안을 고르지 않았을 때 쓸 기본 자막 스타일.
+
+    scan_seed() 는 CapCut 프로젝트에서 스타일을 뽑아내지만, 이건 그 결과를
+    앱 안에 미리 저장해 둔 것입니다(agent/assets/default_text_style.json) —
+    사용자가 CapCut의 "텍스트 사전 설정"으로 만들어 한 번 적용해 둔 스타일을
+    scan_seed() 로 뽑아 고정해 둔 것. 원본 CapCut 프로젝트가 지워져도 이 기본값은
+    남아있습니다. 화면에서 다른 견본을 고르면 그게 우선합니다.
+    """
+    if not _DEFAULT_TEXT_STYLE_PATH.exists():
+        return None
+    try:
+        raw = _load_json(_DEFAULT_TEXT_STYLE_PATH)
+    except (OSError, json.JSONDecodeError):
+        return None
+    return SeedStyle(
+        segment=raw.get("segment") or {},
+        materials=raw.get("materials") or {},
+        render_index=int(raw.get("render_index") or 14000),
+        canvas=raw.get("canvas") or {},
+        platform=raw.get("platform") or {},
+        version=raw.get("version") or {},
+        description=raw.get("description") or "기본 스타일",
+    )
+
+
 def scan_seed(draft_dir: Path) -> SeedStyle:
     """CapCut에서 직접 만든 견본 초안에서 자막 스타일을 추출합니다.
 
     견본에는 텍스트가 최소 한 개 있어야 합니다.
     """
-    # CapCut 버전에 따라 draft_content.json 또는 draft_info.json 을 씁니다.
-    content_path = draft_dir / "draft_content.json"
+    # 이 CapCut은 draft_info.json 을 실제로 계속 갱신하고, draft_content.json 은
+    # (우리 도구가 초안을 처음 만들 때 쓴) 그 시점의 낡은 스냅샷으로 남아있습니다.
+    # 사용자가 CapCut 안에서 자막을 직접 꾸민 뒤 견본으로 쓰려는 것이므로
+    # draft_info.json 을 먼저 봅니다.
+    content_path = draft_dir / "draft_info.json"
     if not content_path.exists():
-        content_path = draft_dir / "draft_info.json"
+        content_path = draft_dir / "draft_content.json"
     if not content_path.exists():
         raise FileNotFoundError(
             f"견본 초안에 draft_content.json / draft_info.json 이 없습니다: {draft_dir}\n"

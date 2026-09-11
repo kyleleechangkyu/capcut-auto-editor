@@ -205,9 +205,9 @@ def _list_drafts(cfg) -> List[Dict[str, Any]]:
         if not p.is_dir():
             continue
         # CapCut 버전에 따라 draft_content.json 또는 draft_info.json 을 씁니다.
-        content_file = p / "draft_content.json"
+        content_file = p / "draft_info.json"
         if not content_file.exists():
-            content_file = p / "draft_info.json"
+            content_file = p / "draft_content.json"
         if not content_file.exists():
             continue
         try:

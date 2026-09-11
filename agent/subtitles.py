@@ -36,12 +36,15 @@ def build_cues(
     utterances: Sequence[Utterance],
     plan: CutPlan,
     *,
-    max_chars: int = 15,
     min_duration: float = 0.7,
     max_duration: float = 4.0,
     strip_punctuation: bool = True,
 ) -> List[Cue]:
-    """발화를 편집본 타임라인으로 옮기고 한 줄 길이에 맞춰 쪼갭니다."""
+    """발화를 편집본 타임라인으로 옮겨 한 구간(컷으로 안 끊긴 말 덩어리)에 자막 하나를 채웁니다.
+
+    글자 수로 쪼개지 않습니다 — CapCut 자체가 박스 안에서 줄바꿈을 해 주므로,
+    여기서 미리 잘게 쪼개면 오히려 사용자가 직접 다시 이어붙여야 합니다.
+    """
     cues: List[Cue] = []
 
     for utt in utterances:
@@ -67,17 +70,13 @@ def build_cues(
                 cues.append(Cue(span[0], span[1], text))
             continue
 
-        # 한 줄 글자 수에 맞춰 묶기
+        # 컷으로 끊기거나(시간이 크게 튐) 너무 길어지는 경우에만 자막을 나눕니다.
         line: List[tuple] = []
         for item in mapped:
-            candidate = _clean(
-                " ".join([w[2] for w in line] + [item[2]]), strip_punctuation
-            )
-            too_long = len(candidate.replace(" ", "")) > max_chars
-            # 편집 컷을 건너뛴 경우(시간이 크게 튐)에도 줄을 끊습니다
             jumped = bool(line) and (item[0] - line[-1][1]) > 0.6
+            too_long = bool(line) and (item[1] - line[0][0]) > max_duration
 
-            if line and (too_long or jumped):
+            if line and (jumped or too_long):
                 cues.append(_make_cue(line, strip_punctuation))
                 line = []
             line.append(item)

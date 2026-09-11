@@ -332,13 +332,6 @@ td.d{color:var(--ink-muted);font-weight:400}
         </div>
         <div class="row">
           <div>
-            <div class="lab">한 줄 글자 수</div>
-            <div class="hint">넘으면 다음 줄로 넘깁니다</div>
-          </div>
-          <div class="seg" id="seg-chars"></div>
-        </div>
-        <div class="row">
-          <div>
             <div class="lab">자주 틀리는 단어</div>
             <div class="hint">이름·브랜드명을 적어두면 인식률이 올라갑니다</div>
           </div>
@@ -471,9 +464,6 @@ function renderSegs(){
       `<button data-g="${g}" data-v="${o}" class="${o===cur?"on":""}">${(LABELS[g]||{})[o]||o}</button>`
     ).join("");
   }
-  const cur = (STATE.subtitle || {}).max_chars || 15;
-  $("#seg-chars").innerHTML = [12,15,18,22].map(n =>
-    `<button data-chars="${n}" class="${n===cur?"on":""}">${n}</button>`).join("");
 }
 
 function renderSeeds(){
@@ -509,12 +499,6 @@ document.addEventListener("click", e => {
     STATE.presets[b.dataset.g] = b.dataset.v;
     save({presets: STATE.presets});
     return;
-  }
-  const c = e.target.closest("button[data-chars]");
-  if(c){
-    c.parentElement.querySelectorAll("button").forEach(x => x.classList.remove("on"));
-    c.classList.add("on");
-    save({subtitle:{max_chars: +c.dataset.chars}});
   }
 });
 
