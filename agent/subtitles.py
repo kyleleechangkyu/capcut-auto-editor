@@ -96,16 +96,17 @@ def build_cues(
     cues = [c for c in cues if c.text]
     cues.sort(key=lambda c: c.start)
 
-    # 다음 자막 시작 직전까지 빈틈없이 채웁니다. 영상은 컷 편집으로 끊김 없이
-    # 이어 붙으므로, 말 사이 짧은 틈에도 이전 자막이 계속 떠 있는 게 (화면이
-    # 비는 것보다) 낫습니다 — 그렇다고 하나가 너무 오래 떠 있진 않도록
-    # max_duration 은 넘기지 않습니다. hard_cap 이 다음 자막을 침범하지 않는
-    # 절대 상한이라, CapCut에 "세그먼트 겹침" 오류가 나지 않습니다.
+    # 다음 자막 시작 지점까지 완전히 붙여 이어줍니다(공백 0초). 영상은 컷
+    # 편집으로 끊김 없이 이어 붙으므로, 말 사이 짧은 틈에도 이전 자막이 계속
+    # 떠 있는 게 (화면이 비는 것보다) 낫습니다 — 그렇다고 하나가 너무 오래
+    # 떠 있진 않도록 max_duration 은 넘기지 않습니다. 부동소수점 비교에서
+    # "겹침"으로 오판되지 않도록 1ms 만 남겨 hard_cap 을 잡습니다 — 이 정도는
+    # CapCut에서도, 화면에서도 공백으로 느껴지지 않습니다.
     for i, c in enumerate(cues):
         # 마지막 자막은 다음 자막이 없으니 편집본 전체 길이가 상한입니다
         # (없으면 영상이 끝난 뒤까지 자막이 늘어날 수 있음).
         next_start = cues[i + 1].start if i + 1 < len(cues) else plan.kept_duration
-        hard_cap = next_start - 0.04
+        hard_cap = next_start - 0.001
         cap = min(hard_cap, c.start + max_duration)
         c.end = max(cap, c.start)
 
