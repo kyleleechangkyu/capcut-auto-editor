@@ -12,6 +12,7 @@ from .transcribe import Utterance
 
 _TRAILING_PUNCT = re.compile(r"[.,!?…·]+$")
 _MULTISPACE = re.compile(r"\s+")
+_SENTENCE_END = re.compile(r"[.!?…]$")
 
 
 @dataclass
@@ -36,20 +37,22 @@ def build_cues(
     utterances: Sequence[Utterance],
     plan: CutPlan,
     *,
+    max_chars: int = 20,
     max_duration: float = 4.0,
     strip_punctuation: bool = True,
 ) -> List[Cue]:
-    """발화를 편집본 타임라인으로 옮겨 한 구간(컷으로 안 끊긴 말 덩어리)에 자막 하나를 채웁니다.
+    """발화를 편집본 타임라인으로 옮겨 어절 단위로 자막을 채웁니다.
 
-    글자 수로 쪼개지 않습니다 — CapCut 자체가 박스 안에서 줄바꿈을 해 주므로,
-    여기서 미리 잘게 쪼개면 오히려 사용자가 직접 다시 이어붙여야 합니다.
+    whisper의 발화(utterance) 경계로 쪼개지 않습니다. 컷 편집이 촘촘하면 원래
+    서로 다른 발화였던 것들이 사이의 무음/비발화 구간이 통째로 잘려나가 편집본
+    에서는 바로 붙어버립니다 — 그런데도 발화 단위로 나누면 뻔히 이어지는 말인데
+    자막만 뚝뚝 끊깁니다. 그래서 모든 발화의 단어를 시간순으로 한 줄로 모읍니다.
 
-    whisper의 발화(utterance) 경계로도 쪼개지 않습니다. 컷 편집이 촘촘하면
-    원래 서로 다른 발화였던 것들이 사이의 무음/비발화 구간이 통째로 잘려나가
-    편집본에서는 바로 붙어버립니다 — 그런데도 발화 단위로 나누면 뻔히 이어지는
-    말인데 자막만 뚝뚝 끊깁니다. 그래서 모든 발화의 단어를 시간순으로 한 줄로
-    모은 뒤, 편집본 기준으로 실제로 끊기거나(시간이 크게 튐) 너무 길어질 때만
-    나눕니다.
+    whisper가 주는 "단어"는 이미 한국어 어절 단위(예: '디지몬이', '한다고')라서
+    어절 중간에서 잘리는 일은 없습니다. 그 위에서 (1) 문장이 끝나는 지점(마침표
+    류)이면 그 자리에서 끊고, (2) 띄어쓰기 포함 max_chars 를 넘기 직전에 끊어,
+    줄바꿈 없이 한 줄에 깔끔하게 들어가도록 합니다. 실제로 컷으로 끊기거나
+    (편집본에서 시간이 크게 튐) 너무 길어질 때도 끊습니다.
     """
     # 잘려나가지 않고 살아남은 단어만, 발화 구분 없이 시간순으로 모읍니다
     mapped: List[tuple] = []
@@ -78,17 +81,32 @@ def build_cues(
 
     mapped.sort(key=lambda item: item[0])
 
-    # 컷으로 끊기거나(편집본에서 시간이 크게 튐) 너무 길어지는 경우에만 자막을 나눕니다.
+    # 컷으로 끊기거나, 문장이 끝나거나, 글자 수(어절 경계에서)나 시간이 넘칠
+    # 때 자막을 나눕니다. 절대 어절 중간에서는 안 끊습니다(단어 단위로만 붙임).
     cues: List[Cue] = []
     line: List[tuple] = []
+    line_len = 0
     for item in mapped:
+        word = item[2]
         jumped = bool(line) and (item[0] - line[-1][1]) > 0.6
-        too_long = bool(line) and (item[1] - line[0][0]) > max_duration
+        candidate_len = (line_len + 1 + len(word)) if line else len(word)
+        too_long_chars = bool(line) and candidate_len > max_chars
+        too_long_time = bool(line) and (item[1] - line[0][0]) > max_duration
 
-        if line and (jumped or too_long):
+        if line and (jumped or too_long_chars or too_long_time):
             cues.append(_make_cue(line, strip_punctuation))
             line = []
+            line_len = 0
+
         line.append(item)
+        line_len = (line_len + 1 + len(word)) if line_len else len(word)
+
+        # 문장이 끝나는 지점(마침표류)이면 글자 수가 남아도 여기서 끊어,
+        # 다음 문장과 한 자막에 섞이지 않게 합니다.
+        if _SENTENCE_END.search(word):
+            cues.append(_make_cue(line, strip_punctuation))
+            line = []
+            line_len = 0
 
     if line:
         cues.append(_make_cue(line, strip_punctuation))

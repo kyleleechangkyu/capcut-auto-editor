@@ -38,6 +38,7 @@ DEFAULTS = {
 
     "subtitle": {
         "enabled": True,
+        "max_chars": 20,  # 띄어쓰기 포함, 어절 경계에서만 끊음(줄바꿈 없이 한 줄)
         "max_duration": 4.0,
         "strip_punctuation": True,
         "position_y": 0.78,
