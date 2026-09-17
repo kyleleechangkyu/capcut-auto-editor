@@ -1,6 +1,6 @@
 {
   "segment": {
-    "id": "9719a02b6b2d476f8c0c7d93ec05902b",
+    "id": "B3D097B0-7AC5-413B-98C2-D335AC9EC0C3",
     "source_timerange": null,
     "target_timerange": {
       "start": 0,
@@ -40,9 +40,9 @@
       "on": true,
       "value": 1.0
     },
-    "material_id": "9ba1f1f3f5544047a3a610f9399e6484",
+    "material_id": "C055BFC7-B253-4AF2-BA38-A4DDE60214BF",
     "extra_material_refs": [],
-    "render_index": 14079,
+    "render_index": 14002,
     "keyframe_refs": [],
     "enable_lut": false,
     "enable_adjust": false,
@@ -87,13 +87,13 @@
     "texts": [
       {
         "recognize_task_id": "",
-        "id": "9ba1f1f3f5544047a3a610f9399e6484",
+        "id": "C055BFC7-B253-4AF2-BA38-A4DDE60214BF",
         "name": "",
         "recognize_text": "",
         "recognize_model": "",
         "punc_model": "",
         "type": "subtitle",
-        "content": "{\"styles\":[{\"fill\":{\"content\":{\"solid\":{\"color\":[1,1,1]},\"render_type\":\"solid\"}},\"range\":[0,15],\"shadows\":[{\"thickness_projection_distance\":0,\"diffuse\":0.039999999105930328,\"angle\":-45,\"thickness_projection_enable\":false,\"content\":{\"solid\":{\"color\":[0,0,0]},\"render_type\":\"solid\"},\"distance\":0,\"thickness_projection_angle\":-45,\"alpha\":0.75}],\"size\":8,\"font\":{\"path\":\"/Users/changkyulee/Library/Containers/com.lemon.lvoverseas/Data/Library/Fonts/210 굴림OTF 050.otf\",\"id\":\"\"}}],\"text\":\"내가 강철의 연금술사 보라고\"}",
+        "content": "{\"styles\":[{\"fill\":{\"content\":{\"solid\":{\"color\":[1,1,1]},\"render_type\":\"solid\"}},\"range\":[0,13],\"shadows\":[{\"thickness_projection_distance\":0,\"diffuse\":0.039999999105930328,\"angle\":-45,\"thickness_projection_enable\":false,\"content\":{\"solid\":{\"color\":[0,0,0]},\"render_type\":\"solid\"},\"distance\":0,\"thickness_projection_angle\":-45,\"alpha\":0.75}],\"size\":7,\"font\":{\"path\":\"/Users/changkyulee/Library/Containers/com.lemon.lvoverseas/Data/Library/Fonts/210 굴림OTF 050.otf\",\"id\":\"\"}}],\"text\":\"이번에 디지몬이 합본으로\"}",
         "base_content": "",
         "words": {
           "start_time": [],
@@ -154,7 +154,7 @@
         "text_alpha": 1.0,
         "font_name": "",
         "font_title": "none",
-        "font_size": 8.0,
+        "font_size": 7.0,
         "font_path": "/Users/changkyulee/Library/Containers/com.lemon.lvoverseas/Data/Library/Fonts/210 굴림OTF 050.otf",
         "font_id": "",
         "font_resource_id": "",
@@ -257,7 +257,7 @@
   },
   "platform": {
     "os": "mac",
-    "os_version": "26.5.2",
+    "os_version": "26.6.2",
     "app_id": 359289,
     "app_version": "6.7.0",
     "app_source": "cc",
@@ -269,5 +269,5 @@
     "version": 360000,
     "new_version": "185.0.0"
   },
-  "description": "기본 큐레이팅(1)"
+  "description": "기본 자막(1)"
 }
