@@ -73,9 +73,27 @@ CapCut의 텍스트 템플릿·말풍선·花字·애니메이션은 CapCut 서�
 기본값(화면에서 견본을 안 골랐을 때)은 `agent/assets/default_text_style.json` 에
 미리 뽑아 저장해 둔 스타일 — `draft.default_text_style()` 가 읽어서 씁니다. 사용자가
 CapCut의 "텍스트 사전 설정"으로 만들어 실제 프로젝트에 적용해 둔 스타일을 한 번 뽑아
-고정해 둔 것(원본 CapCut 프로젝트가 지워져도 남아있음). 기본 스타일을 바꾸려면 그
-프로젝트에서 `scan_seed()` 를 다시 돌려 이 파일을 덮어쓰면 됩니다 — 방법은
-`git log`에서 이 자산을 처음 만든 커밋 참고.
+고정해 둔 것(원본 CapCut 프로젝트가 지워져도 남아있음).
+
+**기본 스타일을 바꿀 때** ("기본 자막을 텍스트 사전 설정에 있는 X로 해줘" 같은 요청):
+1. CapCut 프리셋 이름이 실제로 적용된 초안을 찾는다 —
+   `grep -rl "<프리셋 이름>" "~/Movies/CapCut/User Data"` 로 `.textpreset` 캐시 파일
+   위치를 먼저 확인하고, `materials.texts[].font_size` 등 그 프리셋 고유의 값으로
+   `draft_info.json` 전체를 훑어 실제로 스타일이 적용된 초안(보통 사용자가 우리 도구로
+   만든 뒤 CapCut에서 직접 자막에 입힌 것)을 찾는다. `.textpreset` 자체는 필드가
+   12개뿐이라(진짜 세그먼트는 126개) 부족하다 — 반드시 적용된 실제 초안에서 뽑아야 함.
+2. `draft.scan_seed(그_초안_경로)` 로 뽑아서 아래처럼 자산을 덮어쓴다:
+   ```python
+   style = draft.scan_seed(Path("~/Movies/CapCut/.../그_초안"))
+   out = {"segment": style.segment, "materials": style.materials,
+          "render_index": style.render_index, "canvas": style.canvas,
+          "platform": style.platform, "version": style.version,
+          "description": "<프리셋 이름>"}
+   Path("agent/assets/default_text_style.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
+   ```
+3. 서버가 이미 떠 있으면 재시작 불필요 (`default_text_style()` 는 파일을 매번 새로
+   읽음) — 바로 `/api/run` 으로 실제 파이프라인을 돌려 `style_note` 와 생성된
+   `draft_content.json` 의 `font_size`/`has_shadow`/`font_path` 로 검증한다.
 
 **1-1. scan_seed() 는 draft_info.json 을 draft_content.json 보다 먼저 본다**
 이 CapCut은 draft_info.json 만 실제로 계속 갱신합니다. draft_content.json 은 (우리
