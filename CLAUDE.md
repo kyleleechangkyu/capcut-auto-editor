@@ -55,6 +55,7 @@ agent/audio.py             ffmpeg/ffprobe 래퍼 — 메타데이터, wav 추출
 agent/transcribe.py        faster-whisper 단어 단위 전사 + JSON 캐시
 agent/detect.py            컷 판정 엔진 + 원본↔편집본 타임라인 매핑
 agent/subtitles.py         자막 줄 나누기 + SRT
+agent/korean_break.py      형태소 분석으로 자막 끊는 지점 찾기 (없으면 자동으로 꺼짐)
 agent/draft.py             CapCut draft_content.json 생성 + 견본 스타일 복제
 agent/defaults.py          기본값 + 프리셋 (컷 세기 / 정확도 / 비율)
 agent/config.py            settings.json 병합, CapCut 초안 폴더 자동 탐색
@@ -133,6 +134,26 @@ CapCut이 업데이트돼 스키마가 바뀌어도 견본만 새로 만들면 �
 **4. 자막 시각은 반드시 재매핑한다**
 컷 후 자막 시간이 어긋나므로 `CutPlan.map_span()` 으로 원본→편집본 변환을 거칩니다.
 컷 경계에 55% 미만만 걸친 단어는 조각이므로 버립니다 (`subtitles.build_cues`).
+
+**4-1. 자막이 끊기는 지점은 형태소 분석기(`agent/korean_break.py`)로 정한다**
+whisper 단어(어절)만으로는 "말이 끊기는 지점"을 모릅니다 — 글자 수·시간으로만
+자르면 문장/화제가 한 자막 안에서 뒤섞입니다. `korean_break.analyze_lines()`
+가 KoreanAnalyzer(KAIST 한나눔+꼬꼬마, 자바)로 각 어절의 마지막 형태소 태그를
+얻어, 종결어미(`EF*`)나 화제/대조 조사(`JX`, `JXC` — 는/은/도/만…) 뒤를
+"끊기 좋은 지점"으로 표시합니다. 일반 주격/목적격 조사(JKS/JKO)는 대상이
+아닙니다 — 문장이 계속 이어지는 자리라서.
+
+jar(KoreanAnalyzer-0.2.2.3-jar-with-dependencies.jar, ~90MB, 사전 내장)는
+용량 때문에 저장소에 없고 `KoreanAnalyzer-master/` 에 로컬로만 있습니다
+(.gitignore 처리됨) — **다른 컴퓨터에서는 이 폴더와 java 런타임이 없으면
+이 기능이 자동으로 꺼집니다** (`korean_break.available()` 가 False → 글자 수
+기준 컷으로만 동작, 파이프라인은 안 죽음). 이 무음 폴백을 없애지 마세요.
+
+드라이버는 `agent/assets/korean_break/BreakAnalyzer.java`(+ 컴파일된 .class,
+저장소에 있음) — jar에 대고 `javac`/`java -cp <jar>:<이 폴더> BreakAnalyzer`
+로 다시 빌드/실행. JVM 시동 + 사전 로딩이 매번 몇 초~수십 초 걸리므로, 발화
+전체를 한 번의 서브프로세스 호출로 배치 처리합니다(발화마다 새 JVM 띄우지
+말 것 — 느려서 못 씀).
 
 **5. pymediainfo 를 쓰지 않는다**
 pycapcut의 `VideoMaterial` 이 libmediainfo를 요구하지만, 설치 부담을 줄이려고

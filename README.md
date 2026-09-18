@@ -51,6 +51,7 @@ agent/audio.py             ffmpeg — 오디오 추출, 영상 정보
 agent/transcribe.py        음성 인식 (faster-whisper) + 캐시
 agent/detect.py            컷 판정 + 타임라인 재계산
 agent/subtitles.py         자막 줄 나누기 + SRT
+agent/korean_break.py      형태소 분석으로 자막 끊는 지점 찾기 (없으면 자동으로 꺼짐)
 agent/draft.py             CapCut 초안 쓰기 + 스타일 복제
 agent/defaults.py          기본값
 settings.json              화면에서 바꾼 설정 (자동 생성)

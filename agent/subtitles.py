@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Sequence
 
+from . import korean_break
 from .detect import CutPlan
 from .transcribe import Utterance
 
@@ -49,16 +50,31 @@ def build_cues(
     자막만 뚝뚝 끊깁니다. 그래서 모든 발화의 단어를 시간순으로 한 줄로 모읍니다.
 
     whisper가 주는 "단어"는 이미 한국어 어절 단위(예: '디지몬이', '한다고')라서
-    어절 중간에서 잘리는 일은 없습니다. 그 위에서 (1) 문장이 끝나는 지점(마침표
-    류)이면 그 자리에서 끊고, (2) 띄어쓰기 포함 max_chars 를 넘기 직전에 끊어,
-    줄바꿈 없이 한 줄에 깔끔하게 들어가도록 합니다. 실제로 컷으로 끊기거나
-    (편집본에서 시간이 크게 튐) 너무 길어질 때도 끊습니다.
+    어절 중간에서 잘리는 일은 없습니다. 그 위에서 (1) 형태소 분석기로 문장이
+    끝나는 지점(종결어미)이나 화제/대조 조사(는/은/도/만 등) 뒤처럼 말이 실제로
+    끊기는 지점이면 그 자리에서 끊고 — 형태소 분석기가 없으면 마침표류로만
+    판단합니다 — (2) 띄어쓰기 포함 max_chars 를 넘기 직전에 끊어, 줄바꿈 없이
+    한 줄에 깔끔하게 들어가도록 합니다. 실제로 컷으로 끊기거나(편집본에서 시간이
+    크게 튐) 너무 길어질 때도 끊습니다.
     """
-    # 잘려나가지 않고 살아남은 단어만, 발화 구분 없이 시간순으로 모읍니다
+    # 형태소 분석으로 발화별 "이 어절 뒤에서 끊기 좋다" 여부를 미리 구합니다.
+    # 분석기가 없거나(java/jar 미설치) 발화의 어절 수와 분석 결과가 안 맞으면
+    # 그 발화는 그냥 None(전부 안 끊음)으로 두고 문장부호/글자수 기준만 씁니다.
+    utt_lines = [" ".join(w.text for w in utt.words) for utt in utterances]
+    break_results = korean_break.analyze_lines(utt_lines) if utt_lines else None
+
+    # 잘려나가지 않고 살아남은 단어만, 발화 구분 없이 시간순으로 모읍니다.
+    # 각 항목은 (시작, 끝, 글자, 형태소 분석상 끊기 좋은 지점인지).
     mapped: List[tuple] = []
-    for utt in utterances:
+    for utt_idx, utt in enumerate(utterances):
+        flags = None
+        if break_results is not None and utt_idx < len(break_results):
+            f = break_results[utt_idx]
+            if f is not None and len(f) == len(utt.words):
+                flags = f
+
         utt_mapped = []
-        for w in utt.words:
+        for wi, w in enumerate(utt.words):
             span = plan.map_span(w.start, w.end)
             if span is None:
                 continue
@@ -66,7 +82,8 @@ def build_cues(
             original = max(1e-6, w.end - w.start)
             if (span[1] - span[0]) / original < 0.55:
                 continue
-            utt_mapped.append((span[0], span[1], w.text))
+            prefer_break = bool(flags[wi]) if flags is not None else False
+            utt_mapped.append((span[0], span[1], w.text, prefer_break))
 
         if utt_mapped:
             mapped.extend(utt_mapped)
@@ -77,12 +94,13 @@ def build_cues(
                 continue
             text = _clean(utt.text, strip_punctuation)
             if text:
-                mapped.append((span[0], span[1], text))
+                mapped.append((span[0], span[1], text, False))
 
     mapped.sort(key=lambda item: item[0])
 
-    # 컷으로 끊기거나, 문장이 끝나거나, 글자 수(어절 경계에서)나 시간이 넘칠
-    # 때 자막을 나눕니다. 절대 어절 중간에서는 안 끊습니다(단어 단위로만 붙임).
+    # 컷으로 끊기거나, 말이 끊기는 지점(형태소 분석/마침표류)이거나, 글자 수
+    # (어절 경계에서)나 시간이 넘칠 때 자막을 나눕니다. 절대 어절 중간에서는
+    # 안 끊습니다(단어 단위로만 붙임).
     cues: List[Cue] = []
     line: List[tuple] = []
     line_len = 0
@@ -101,9 +119,9 @@ def build_cues(
         line.append(item)
         line_len = (line_len + 1 + len(word)) if line_len else len(word)
 
-        # 문장이 끝나는 지점(마침표류)이면 글자 수가 남아도 여기서 끊어,
-        # 다음 문장과 한 자막에 섞이지 않게 합니다.
-        if _SENTENCE_END.search(word):
+        # 말이 끊기는 지점(형태소 분석상 종결어미/화제 조사, 또는 마침표류)이면
+        # 글자 수가 남아도 여기서 끊어, 다음 구절과 한 자막에 섞이지 않게 합니다.
+        if item[3] or _SENTENCE_END.search(word):
             cues.append(_make_cue(line, strip_punctuation))
             line = []
             line_len = 0
