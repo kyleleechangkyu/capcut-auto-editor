@@ -164,6 +164,53 @@ def scan_seed(draft_dir: Path) -> SeedStyle:
     )
 
 
+# 폰트를 강제로 바꿀 때 같이 비워야 하는 필드들. CapCut은 font_id/
+# font_resource_id 가 채워져 있으면 경로보다 그 카탈로그 ID를 우선해서
+# 예전 폰트를 계속 쓸 수 있어, 로컬 파일 경로만으로 찾도록 전부 비웁니다.
+# agent/assets/default_text_style.json 도 원래 이 방식(빈 ID + 경로만)으로
+# 저장돼 있고 실제로 정상 동작이 확인됐습니다.
+_FONT_ID_RESET = {
+    "font_name": "",
+    "font_title": "none",
+    "font_id": "",
+    "font_resource_id": "",
+    "font_url": "",
+    "font_category_name": "",
+    "font_source_platform": 0,
+    "font_third_resource_id": "",
+    "font_category_id": "",
+    "fonts": [],
+}
+
+
+def apply_font_override(seed: SeedStyle, font_path: str) -> None:
+    """견본 스타일의 폰트를 지정한 로컬 폰트 파일 하나로 바꿉니다(제자리 수정).
+
+    화면 비율·그림자 등 나머지 스타일은 그대로 두고 폰트만 바꿉니다. 존재
+    여부는 호출하는 쪽(pipeline.py)에서 미리 확인합니다 — 여기서는 그냥
+    적용만 합니다.
+    """
+    for item in seed.materials.get("texts", []):
+        for key, value in _FONT_ID_RESET.items():
+            if key in item:
+                item[key] = value
+        item["font_path"] = font_path
+
+        try:
+            data = json.loads(item.get("content", ""))
+        except (TypeError, ValueError):
+            continue
+        changed = False
+        for style in data.get("styles") or []:
+            font = style.get("font")
+            if isinstance(font, dict):
+                font["path"] = font_path
+                font["id"] = ""
+                changed = True
+        if changed:
+            item["content"] = json.dumps(data, ensure_ascii=False)
+
+
 def _replace_text_content(raw: str, new_text: str) -> str:
     """텍스트 재료의 content(JSON 문자열) 안의 글자를 바꾸고 스타일 범위를 맞춥니다."""
     try:

@@ -15,6 +15,7 @@ import sys
 import threading
 import time
 import traceback
+import unicodedata
 import urllib.parse
 import uuid
 import webbrowser
@@ -31,6 +32,29 @@ from agent import config as config_mod  # noqa: E402
 from agent.defaults import PRESETS  # noqa: E402
 
 VIDEO_EXT = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
+
+# CapCut(App 샌드박스)이 실제로 읽을 수 있는 폰트는 이 폴더 안의 것뿐입니다 —
+# 다른 위치의 폰트를 경로로 지정하면 media_dir과 같은 이유로 "액세스할 수
+# 없음" 오류가 납니다. CapCut 자체가 여기 내려받아둔 폰트가 수천 개라
+# 사실상 폰트 선택기로 쓰기 충분합니다.
+_FONTS_DIR = Path.home() / "Library" / "Containers" / "com.lemon.lvoverseas" / "Data" / "Library" / "Fonts"
+_FONT_EXT = {".otf", ".ttf", ".ttc"}
+
+
+def _list_fonts() -> List[Dict[str, str]]:
+    if sys.platform != "darwin" or not _FONTS_DIR.is_dir():
+        return []
+    out = []
+    for p in _FONTS_DIR.iterdir():
+        if p.is_file() and p.suffix.lower() in _FONT_EXT:
+            # macOS 파일시스템은 한글 파일명을 NFD(자모 분해형)로 돌려주는데
+            # 사람이 타이핑하는 건 보통 NFC(완성형)라, 정규화 없이 두면 폰트
+            # 검색창에 이름을 쳐도 안 걸린다. 화면에 보여주고 검색할 이름만
+            # NFC로 바꾸고, 실제 파일을 여는 경로(path)는 원래 형태 그대로 둔다.
+            out.append({"name": unicodedata.normalize("NFC", p.stem), "path": str(p)})
+    out.sort(key=lambda f: f["name"])
+    return out
+
 
 
 # ---------------------------------------------------------------- 작업 관리
@@ -345,6 +369,10 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/seed":
             cfg = config_mod.load()
             self._json(_seed_info(cfg, (qs.get("name") or [""])[0]))
+            return
+
+        if route == "/api/fonts":
+            self._json({"fonts": _list_fonts()})
             return
 
         if route == "/api/job":

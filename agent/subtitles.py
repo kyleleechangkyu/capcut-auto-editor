@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,7 +57,22 @@ def build_cues(
     판단합니다 — (2) 띄어쓰기 포함 max_chars 를 넘기 직전에 끊어, 줄바꿈 없이
     한 줄에 깔끔하게 들어가도록 합니다. 실제로 컷으로 끊기거나(편집본에서 시간이
     크게 튐) 너무 길어질 때도 끊습니다.
+
+    자막(텍스트 바)은 CapCut 타임라인에서 항상 영상 클립(`plan.keeps`의 한
+    구간) 하나 안에만 있어야 합니다 — 클립 경계를 걸쳐서 자막이 이어지면
+    텍스트 바 길이와 그 아래 클립 길이가 안 맞아 보입니다. 그래서 클립이
+    바뀌는 지점에서도 무조건 끊고, 자막을 다음 자막 시작까지 채워 늘일 때도
+    지금 클립의 끝을 넘어가지 않게 상한을 둡니다.
     """
+    keep_starts = [k.timeline_start for k in plan.keeps]
+    keep_ends = [k.timeline_start + k.duration for k in plan.keeps]
+
+    def _keep_index(t: float) -> int:
+        if not keep_starts:
+            return 0
+        i = bisect.bisect_right(keep_starts, t) - 1
+        return max(0, min(i, len(keep_starts) - 1))
+
     # 형태소 분석으로 발화별 "이 어절 뒤에서 끊기 좋다" 여부를 미리 구합니다.
     # 분석기가 없거나(java/jar 미설치) 발화의 어절 수와 분석 결과가 안 맞으면
     # 그 발화는 그냥 None(전부 안 끊음)으로 두고 문장부호/글자수 기준만 씁니다.
@@ -107,11 +123,12 @@ def build_cues(
     for item in mapped:
         word = item[2]
         jumped = bool(line) and (item[0] - line[-1][1]) > 0.6
+        new_clip = bool(line) and _keep_index(item[0]) != _keep_index(line[-1][1])
         candidate_len = (line_len + 1 + len(word)) if line else len(word)
         too_long_chars = bool(line) and candidate_len > max_chars
         too_long_time = bool(line) and (item[1] - line[0][0]) > max_duration
 
-        if line and (jumped or too_long_chars or too_long_time):
+        if line and (jumped or new_clip or too_long_chars or too_long_time):
             cues.append(_make_cue(line, strip_punctuation))
             line = []
             line_len = 0
@@ -140,9 +157,13 @@ def build_cues(
     # 오래 떠 있는 쪽이 낫다고 봅니다.
     for i, c in enumerate(cues):
         # 마지막 자막은 다음 자막이 없으니 편집본 전체 길이가 상한입니다
-        # (없으면 영상이 끝난 뒤까지 자막이 늘어날 수 있음).
+        # (없으면 영상이 끝난 뒤까지 자막이 늘어날 수 있음). 그리고 항상
+        # 지금 클립의 끝을 넘지 않게 상한을 둡니다 — 텍스트 바가 다음 클립
+        # 으로 넘어가지 않도록.
         next_start = cues[i + 1].start if i + 1 < len(cues) else plan.kept_duration
-        c.end = max(next_start - 0.001, c.start)
+        clip_end = keep_ends[_keep_index(c.start)] if keep_ends else next_start
+        cap = min(next_start, clip_end)
+        c.end = max(cap - 0.001, c.start)
 
     return [c for c in cues if c.duration > 0.1]
 

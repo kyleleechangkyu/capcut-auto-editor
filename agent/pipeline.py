@@ -227,6 +227,16 @@ def process(
         # 기존 초안 아무거나 하나를 구조 복제용 스캐폴드로 쓴다.
         scaffold_dir = draft.find_scaffold(drafts_dir)
 
+    # 화면에서 기본 폰트를 골라뒀으면 견본 스타일의 폰트만 바꿔치기한다
+    # (그림자·색상 등 나머지 스타일은 그대로).
+    font_path = str(sub.get("font_path") or "")
+    if seed is not None and font_path:
+        if Path(font_path).is_file():
+            draft.apply_font_override(seed, font_path)
+            p.log(f"폰트: {Path(font_path).stem}")
+        else:
+            p.log(f"선택한 폰트 파일을 찾을 수 없어 원래 스타일의 폰트를 씁니다 — {font_path}")
+
     d = cfg.get_path("draft", {}) or {}
     width = int(d.get("width", 1080)) or info.width
     height = int(d.get("height", 1920)) or info.height

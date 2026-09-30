@@ -337,6 +337,14 @@ td.d{color:var(--ink-muted);font-weight:400}
           </div>
           <input type="text" id="prompt" placeholder="캡컷, 릴스, 온보딩">
         </div>
+        <div class="row">
+          <div>
+            <div class="lab">기본 폰트</div>
+            <div class="hint" id="font-hint">자막 스타일에 저장된 폰트를 그대로 씁니다</div>
+          </div>
+          <input type="text" id="font" list="font-list" placeholder="폰트 검색…" autocomplete="off">
+          <datalist id="font-list"></datalist>
+        </div>
       </details>
     </div>
   </section>
@@ -406,6 +414,7 @@ td.d{color:var(--ink-muted);font-weight:400}
 const $ = s => document.querySelector(s);
 const api = (p, o) => fetch(p, o).then(r => r.json());
 let STATE = null, JOB = null, POLL = null;
+let FONTS_BY_NAME = new Map();
 
 const LABELS = {
   cut_strength: {loose:"여유롭게", normal:"보통", tight:"촘촘하게"},
@@ -437,6 +446,19 @@ async function boot(){
   renderSegs();
   renderSeeds();
   $("#prompt").value = STATE.transcribe_prompt || "";
+  renderFont();
+}
+
+const escAttr = s => String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
+
+async function renderFont(){
+  const sub = STATE.subtitle || {};
+  $("#font").value = sub.font_name || "";
+  try{
+    const { fonts } = await api("/api/fonts");
+    FONTS_BY_NAME = new Map(fonts.map(f => [f.name, f.path]));
+    $("#font-list").innerHTML = fonts.map(f => `<option value="${escAttr(f.name)}">`).join("");
+  }catch(err){ /* 폰트 목록은 없어도 나머지 기능엔 지장 없음 */ }
 }
 
 function renderChip(){
@@ -511,6 +533,15 @@ let pt;
 $("#prompt").addEventListener("input", () => {
   clearTimeout(pt);
   pt = setTimeout(() => save({transcribe:{initial_prompt: $("#prompt").value}}), 500);
+});
+
+$("#font").addEventListener("change", () => {
+  const name = $("#font").value.trim();
+  const path = FONTS_BY_NAME.get(name) || "";
+  // 목록에 없는 값(직접 입력)이면 폰트 교체를 켜지 않고 견본 스타일의
+  // 원래 폰트로 되돌립니다 — 잘못된 경로를 CapCut에 넘기지 않기 위함.
+  if(name && !path){ $("#font").value = ""; }
+  save({subtitle:{font_path: path, font_name: path ? name : ""}});
 });
 
 // ───────────────────────── 파일 받기
