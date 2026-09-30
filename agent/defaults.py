@@ -2,7 +2,8 @@
 
 DEFAULTS = {
     "capcut_drafts": "",      # 비우면 자동 탐색
-    "seed_draft": "",         # 자막 스타일 견본으로 쓸 초안 이름 (앱에서 선택)
+    "text_preset_path": "",   # 자막 스타일로 쓸 CapCut 텍스트 사전 설정(.textpreset) 경로 (앱에서 선택)
+    "text_preset_name": "",   # 위 경로의 표시용 이름
 
     "transcribe": {
         "model": "large-v3-turbo",

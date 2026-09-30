@@ -206,29 +206,34 @@ def process(
     # 6) 초안 ------------------------------------------------------
     p.stage("draft")
     drafts_dir = draft.resolve_drafts_dir(str(cfg.get("capcut_drafts") or ""))
+    # CapCut이 요구하는 부속 파일(Resources/ 등)을 통째로 복제해 올 스캐폴드 —
+    # 자막 스타일과는 무관하게 아무 기존 초안이나 쓴다.
+    scaffold_dir = draft.find_scaffold(drafts_dir)
 
-    seed = None
-    scaffold_dir = None
-    seed_name = str(cfg.get("seed_draft") or "")
-    if seed_name and (drafts_dir / seed_name).is_dir():
-        scaffold_dir = drafts_dir / seed_name
-        try:
-            seed = draft.scan_seed(drafts_dir / seed_name)
-            p.log(f"자막 스타일: {seed.description}")
-        except (ValueError, FileNotFoundError) as exc:
-            p.log(f"견본을 못 읽어 기본 스타일로 갑니다 — {exc}")
-    if seed is None:
-        # 화면에서 견본을 따로 고르지 않았으면 앱에 저장된 기본 자막 스타일을 씁니다.
-        seed = draft.default_text_style()
-        if seed:
-            p.log(f"자막 스타일: {seed.description} (기본값)")
-    if scaffold_dir is None:
-        # 자막 견본을 고르지 않았어도 CapCut이 요구하는 부속 파일은 필요하므로
-        # 기존 초안 아무거나 하나를 구조 복제용 스캐폴드로 쓴다.
-        scaffold_dir = draft.find_scaffold(drafts_dir)
+    # 자막 스타일은 앱에 미리 저장해 둔 기본 뼈대(애니메이션·템플릿 참조 등
+    # 프리셋 파일엔 없는 배관 정보)를 쓰고, 화면에서 CapCut의 '텍스트 사전
+    # 설정'을 하나 골라뒀으면 그 색상/폰트/그림자/간격을 그 위에 입힌다 —
+    # 매번 스타일을 입힌 CapCut 프로젝트를 따로 만들어 둘 필요 없이, CapCut
+    # 안에서 사전 설정을 바꾸면 다음 실행부터 바로 반영된다.
+    seed = draft.default_text_style()
+    if seed:
+        p.log(f"자막 스타일: {seed.description} (기본 뼈대)")
 
-    # 화면에서 기본 폰트를 골라뒀으면 견본 스타일의 폰트만 바꿔치기한다
-    # (그림자·색상 등 나머지 스타일은 그대로).
+    preset_path = str(cfg.get("text_preset_path") or "")
+    if seed is not None and preset_path:
+        if Path(preset_path).is_file():
+            try:
+                preset = draft.load_text_preset(Path(preset_path))
+                draft.apply_preset_style(seed, preset)
+                p.log(f"텍스트 사전 설정: {preset['name']}")
+            except (OSError, ValueError, KeyError) as exc:
+                p.log(f"텍스트 사전 설정을 못 읽어 기본 스타일로 갑니다 — {exc}")
+        else:
+            p.log(f"선택한 텍스트 사전 설정을 찾을 수 없어 기본 스타일로 갑니다 — {preset_path}")
+
+    # 화면에서 기본 폰트를 따로 골라뒀으면(사전 설정과 별개 설정) 폰트만
+    # 마지막에 다시 한번 바꿔치기한다 — 사전 설정의 그림자·색상은 그대로 두고
+    # 폰트만 원하는 것으로 쓰고 싶을 때를 위함.
     font_path = str(sub.get("font_path") or "")
     if seed is not None and font_path:
         if Path(font_path).is_file():

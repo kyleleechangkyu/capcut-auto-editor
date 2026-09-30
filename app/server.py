@@ -220,46 +220,13 @@ def _checks(cfg) -> List[Dict[str, Any]]:
     return out
 
 
-def _list_drafts(cfg) -> List[Dict[str, Any]]:
-    drafts = cfg.get("capcut_drafts") or ""
-    if not drafts or not Path(drafts).is_dir():
-        return []
-    items = []
-    for p in Path(drafts).iterdir():
-        if not p.is_dir():
-            continue
-        # CapCut 버전에 따라 draft_content.json 또는 draft_info.json 을 씁니다.
-        content_file = p / "draft_info.json"
-        if not content_file.exists():
-            content_file = p / "draft_content.json"
-        if not content_file.exists():
-            continue
-        try:
-            mtime = content_file.stat().st_mtime
-        except OSError:
-            mtime = 0
-        items.append({"name": p.name, "mtime": mtime})
-    items.sort(key=lambda x: -x["mtime"])
-    return items[:60]
-
-
-def _seed_info(cfg, name: str) -> Dict[str, Any]:
+def _list_text_presets(cfg) -> List[Dict[str, str]]:
     from agent import draft as draft_mod
 
     drafts = cfg.get("capcut_drafts") or ""
-    if not name or not drafts:
-        return {"ok": False, "message": "선택된 견본이 없습니다."}
-    d = Path(drafts) / name
-    try:
-        style = draft_mod.scan_seed(d)
-    except (ValueError, FileNotFoundError) as exc:
-        return {"ok": False, "message": str(exc)}
-    return {
-        "ok": True,
-        "description": style.description,
-        "has_template": style.has_template,
-        "app_version": style.platform.get("app_version", ""),
-    }
+    if not drafts or not Path(drafts).is_dir():
+        return []
+    return draft_mod.list_text_presets(Path(drafts))
 
 
 # ---------------------------------------------------------------- 맥 연동
@@ -355,8 +322,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({
                 "checks": _checks(cfg),
                 "drafts_dir": cfg.get("capcut_drafts") or "",
-                "drafts": _list_drafts(cfg),
-                "seed_draft": cfg.get("seed_draft") or "",
+                "text_presets": _list_text_presets(cfg),
+                "text_preset_path": cfg.get("text_preset_path") or "",
                 "presets": cfg.get("presets"),
                 "preset_options": {k: list(v.keys()) for k, v in PRESETS.items()},
                 "subtitle": cfg.get_path("subtitle", {}),
@@ -364,11 +331,6 @@ class Handler(BaseHTTPRequestHandler):
                 "platform": sys.platform,
                 "stages": [{"key": k, "label": l} for k, l in _stages()],
             })
-            return
-
-        if route == "/api/seed":
-            cfg = config_mod.load()
-            self._json(_seed_info(cfg, (qs.get("name") or [""])[0]))
             return
 
         if route == "/api/fonts":

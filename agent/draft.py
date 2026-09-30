@@ -211,6 +211,143 @@ def apply_font_override(seed: SeedStyle, font_path: str) -> None:
             item["content"] = json.dumps(data, ensure_ascii=False)
 
 
+# ---------------------------------------------------------------- 텍스트 사전 설정
+
+def resolve_text_presets_dir(drafts_dir: Path) -> Path:
+    """CapCut '텍스트 사전 설정'(.textpreset) 파일이 있는 폴더.
+
+    초안 폴더(.../User Data/Projects/com.lveditor.draft)와 같은
+    'User Data' 아래(.../User Data/Cache/onlineMaterial)에 있습니다.
+    """
+    return drafts_dir.parent.parent / "Cache" / "onlineMaterial"
+
+
+def list_text_presets(drafts_dir: Path) -> List[Dict[str, str]]:
+    """사용자가 CapCut에서 저장해 둔 텍스트 사전 설정 목록."""
+    presets_dir = resolve_text_presets_dir(drafts_dir)
+    if not presets_dir.is_dir():
+        return []
+    out = []
+    for p in presets_dir.glob("*.textpreset"):
+        try:
+            data = _load_json(p)
+        except (OSError, json.JSONDecodeError):
+            continue
+        out.append({"name": str(data.get("name") or p.stem), "path": str(p)})
+    out.sort(key=lambda f: f["name"])
+    return out
+
+
+def load_text_preset(path: Path) -> Dict[str, Any]:
+    """텍스트 사전 설정 파일 하나를 읽어 스타일 값과 폰트 경로를 뽑아냅니다."""
+    raw = _load_json(path)
+    font_path = ""
+    for res in raw.get("resources") or []:
+        if res.get("panel") == "fonts" and res.get("file_path"):
+            font_path = res["file_path"]
+            break
+    return {
+        "name": raw.get("name") or path.stem,
+        "style": raw.get("style") or {},
+        "font_path": font_path,
+    }
+
+
+def _hex_to_rgb01(hex_color: str) -> Optional[List[float]]:
+    h = (hex_color or "").lstrip("#")
+    if len(h) != 6:
+        return None
+    try:
+        return [int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4)]
+    except ValueError:
+        return None
+
+
+def apply_preset_style(seed: SeedStyle, preset: Dict[str, Any]) -> None:
+    """견본 스타일 위에 텍스트 사전 설정(.textpreset)의 색상/폰트/그림자 등을 입힙니다(제자리 수정).
+
+    .textpreset 은 draft_content.json 의 완전한 텍스트 조각 스키마와는 다른,
+    CapCut 자체의 단순화된 스타일 표현이라 통째로 갈아끼울 수 없습니다.
+    대신 실제 초안에서 뽑은 값과 직접 대조해 이름·단위가 정확히 같다고
+    확인된 필드(정렬/줄간격/자간/글자크기/색/그림자)만 seed 위에 덮어쓰고,
+    말풍선·곡선 텍스트·애니메이션처럼 대응 관계를 확인하지 못한 나머지는
+    건드리지 않은 채 seed 의 것을 그대로 둡니다. 실제로 렌더링에 쓰이는
+    쪽은 content(JSON 문자열) 안의 styles[] 이고, 문서 최상위 필드(text_color
+    등)는 CapCut 자체가 비워두는 경우도 있는 보조 기록이라 두 쪽 다 맞춰
+    씁니다.
+    """
+    font_path = preset.get("font_path") or ""
+    if font_path:
+        apply_font_override(seed, font_path)
+
+    seed.description = str(preset.get("name") or seed.description)
+
+    style = preset.get("style") or {}
+    rgb = _hex_to_rgb01(style.get("color", ""))
+    has_shadow = bool(style.get("shadow_checked"))
+    shadow_rgb = _hex_to_rgb01(style.get("shadow_color", "")) if has_shadow else None
+
+    for item in seed.materials.get("texts", []):
+        if "font_size" in style:
+            item["font_size"] = float(style["font_size"])
+        if "alignment" in style:
+            item["alignment"] = int(style["alignment"])
+        if "line_spacing" in style:
+            item["line_spacing"] = float(style["line_spacing"])
+        if "letter_spacing" in style:
+            item["letter_spacing"] = float(style["letter_spacing"])
+        if "text_alpha" in style:
+            item["text_alpha"] = float(style["text_alpha"])
+        if "global_alpha" in style:
+            item["global_alpha"] = float(style["global_alpha"])
+        if "italic_degree" in style:
+            item["italic_degree"] = style["italic_degree"]
+        if rgb and style.get("color"):
+            item["text_color"] = style["color"]
+        item["has_shadow"] = has_shadow
+        if has_shadow:
+            if style.get("shadow_color"):
+                item["shadow_color"] = style["shadow_color"]
+            if "shadow_alpha" in style:
+                item["shadow_alpha"] = float(style["shadow_alpha"])
+            if "shadow_angle" in style:
+                item["shadow_angle"] = float(style["shadow_angle"])
+            if "shadow_distance" in style:
+                item["shadow_distance"] = float(style["shadow_distance"])
+
+        try:
+            data = json.loads(item.get("content", ""))
+        except (TypeError, ValueError):
+            continue
+        changed = False
+        for s in data.get("styles") or []:
+            if "font_size" in style:
+                s["size"] = float(style["font_size"])
+                changed = True
+            if rgb:
+                fill = s.setdefault("fill", {}).setdefault("content", {})
+                fill["render_type"] = "solid"
+                fill.setdefault("solid", {})["color"] = rgb
+                changed = True
+            shadows = s.get("shadows") or []
+            if has_shadow and shadows:
+                sh = shadows[0]
+                if shadow_rgb:
+                    sh.setdefault("content", {}).setdefault("solid", {})["color"] = shadow_rgb
+                if "shadow_alpha" in style:
+                    sh["alpha"] = float(style["shadow_alpha"])
+                if "shadow_angle" in style:
+                    sh["angle"] = float(style["shadow_angle"])
+                if "shadow_distance" in style:
+                    sh["distance"] = float(style["shadow_distance"])
+                changed = True
+            elif not has_shadow and shadows:
+                s["shadows"] = []
+                changed = True
+        if changed:
+            item["content"] = json.dumps(data, ensure_ascii=False)
+
+
 def _replace_text_content(raw: str, new_text: str) -> str:
     """텍스트 재료의 content(JSON 문자열) 안의 글자를 바꾸고 스타일 범위를 맞춥니다."""
     try:

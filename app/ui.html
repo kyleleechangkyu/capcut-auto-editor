@@ -316,7 +316,7 @@ td.d{color:var(--ink-muted);font-weight:400}
       <div class="row">
         <div>
           <div class="lab">자막 스타일</div>
-          <div class="hint" id="seed-hint">CapCut에서 만든 프로젝트의 첫 자막 스타일을 그대로 씁니다</div>
+          <div class="hint">CapCut의 '텍스트 사전 설정'에 저장해 둔 스타일을 그대로 씁니다</div>
         </div>
         <select id="seed"></select>
       </div>
@@ -490,23 +490,10 @@ function renderSegs(){
 
 function renderSeeds(){
   const sel = $("#seed");
-  sel.innerHTML = `<option value="">기본 자막</option>` +
-    (STATE.drafts || []).map(d => `<option value="${d.name}">${d.name}</option>`).join("");
-  sel.value = STATE.seed_draft || "";
-  describeSeed();
-}
-
-async function describeSeed(){
-  const name = $("#seed").value, hint = $("#seed-hint");
-  if(!name){
-    hint.textContent = "CapCut에서 원하는 스타일로 자막 한 줄을 만들어 두면 그대로 따라합니다";
-    return;
-  }
-  hint.textContent = "확인 중…";
-  const info = await api("/api/seed?name=" + encodeURIComponent(name));
-  hint.textContent = info.ok
-    ? info.description + (info.has_template ? " · 텍스트 템플릿 포함" : "")
-    : "이 프로젝트에는 자막이 없습니다. 자막이 있는 프로젝트를 골라주세요.";
+  sel.innerHTML = `<option value="">기본 스타일</option>` +
+    (STATE.text_presets || []).map(p =>
+      `<option value="${escAttr(p.path)}">${escAttr(p.name)}</option>`).join("");
+  sel.value = STATE.text_preset_path || "";
 }
 
 // ───────────────────────── 설정 저장
@@ -525,8 +512,10 @@ document.addEventListener("click", e => {
 });
 
 $("#seed").addEventListener("change", () => {
-  save({seed_draft: $("#seed").value});
-  describeSeed();
+  const sel = $("#seed");
+  const path = sel.value;
+  const name = path ? sel.options[sel.selectedIndex].textContent : "";
+  save({text_preset_path: path, text_preset_name: name});
 });
 
 let pt;
