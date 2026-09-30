@@ -55,6 +55,18 @@ class RunResult:
     info: Optional[audio.MediaInfo] = None
 
 
+def _cleanup_media_dir(media_dir: Path, keep: Path) -> None:
+    """media_dir 안에서 keep(지금 처리하는 영상)만 남기고 나머지 파일을 지운다."""
+    keep = keep.resolve()
+    for entry in media_dir.iterdir():
+        if entry.is_dir() or entry.resolve() == keep:
+            continue
+        try:
+            entry.unlink()
+        except OSError:
+            pass
+
+
 def process(
     video: Path,
     cfg: Config,
@@ -77,6 +89,11 @@ def process(
         if not (dest.exists() and dest.resolve() == video.resolve()):
             shutil.copy2(video, dest)
         video = dest
+
+    # 미디어 보관함엔 지금 편집하는 영상만 남긴다 — 안 그러면 이전에
+    # 골랐던 영상들이 계속 쌓인다.
+    if video.parent == cfg.media_dir:
+        _cleanup_media_dir(cfg.media_dir, keep=video)
 
     job = cfg.work_dir / video.stem
     job.mkdir(parents=True, exist_ok=True)
