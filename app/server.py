@@ -89,6 +89,33 @@ JOBS: Dict[str, Job] = {}
 JOBS_LOCK = threading.Lock()
 
 
+_LAST_SWEEP = 0.0
+
+
+def _sweep_media(*, force: bool = False) -> None:
+    """CapCut에서 지운 프로젝트의 영상을 미디어 보관함에서 정리한다.
+
+    작업이 돌고 있을 땐 건너뛴다(처리 중인 영상은 아직 어느 초안에도 안 적혀 있음).
+    화면을 열 때마다 불리므로 1분에 한 번만 실제로 훑는다.
+    """
+    global _LAST_SWEEP
+    now = time.time()
+    if not force and now - _LAST_SWEEP < 60:
+        return
+    with JOBS_LOCK:
+        if any(not j.done for j in JOBS.values()):
+            return
+    _LAST_SWEEP = now
+    try:
+        from agent import pipeline
+
+        removed = pipeline.sweep_media_dir(config_mod.load())
+        if removed:
+            print(f"  쓰이지 않는 영상 {len(removed)}개 정리: {', '.join(removed)}", flush=True)
+    except Exception:
+        traceback.print_exc()
+
+
 def _run_job(job: Job) -> None:
     from agent import pipeline
 
@@ -318,6 +345,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == "/api/state":
+            _sweep_media()
             cfg = config_mod.load()
             self._json({
                 "checks": _checks(cfg),
@@ -435,6 +463,7 @@ def _free_port(preferred: int = 8756) -> int:
 
 
 def main() -> int:
+    _sweep_media(force=True)
     port = _free_port()
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}/"

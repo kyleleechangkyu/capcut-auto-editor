@@ -55,16 +55,53 @@ class RunResult:
     info: Optional[audio.MediaInfo] = None
 
 
-def _cleanup_media_dir(media_dir: Path, keep: Path) -> None:
-    """media_dir 안에서 keep(지금 처리하는 영상)만 남기고 나머지 파일을 지운다."""
-    keep = keep.resolve()
+def sweep_media_dir(
+    cfg: Config, keep: Optional[Path] = None, *, min_age_seconds: float = 1800.0
+) -> List[str]:
+    """media_dir 에서 더 이상 아무 CapCut 프로젝트도 쓰지 않는 영상을 지웁니다.
+
+    CapCut에서 프로젝트를 지우면(휴지통으로 가면) 그 영상은 이 폴더에 고아로 남으므로
+    함께 정리하고, 우리 도구로 만든 초안이든 사용자가 직접 만든 프로젝트든 하나라도
+    아직 쓰고 있는 파일은 건드리지 않습니다. 아래 경우엔 아무것도 지우지 않습니다 —
+    초안 폴더를 못 찾거나 읽지 못할 때(누가 쓰는지 판단 불가), keep(지금 처리하는
+    영상), 방금 들어온 파일(min_age_seconds 이내 — 업로드 직후 아직 작업 시작 전일 수
+    있음). 지운 파일 이름 목록을 돌려줍니다.
+    """
+    media_dir = cfg.media_dir
+    try:
+        drafts_dir = draft.resolve_drafts_dir(str(cfg.get("capcut_drafts") or ""))
+    except FileNotFoundError:
+        return []
+
+    keep_resolved = keep.resolve() if keep else None
+    now = time.time()
+    candidates: List[Path] = []
     for entry in media_dir.iterdir():
-        if entry.is_dir() or entry.resolve() == keep:
+        if entry.is_dir() or (keep_resolved and entry.resolve() == keep_resolved):
+            continue
+        try:
+            if now - entry.stat().st_ctime < min_age_seconds:
+                continue
+        except OSError:
+            continue
+        candidates.append(entry)
+    if not candidates:
+        return []
+
+    used = draft.find_referenced_media(drafts_dir, [c.name for c in candidates])
+    if used is None:
+        return []
+
+    removed: List[str] = []
+    for entry in candidates:
+        if entry.name in used:
             continue
         try:
             entry.unlink()
+            removed.append(entry.name)
         except OSError:
             pass
+    return removed
 
 
 def process(
@@ -90,10 +127,11 @@ def process(
             shutil.copy2(video, dest)
         video = dest
 
-    # 미디어 보관함엔 지금 편집하는 영상만 남긴다 — 안 그러면 이전에
-    # 골랐던 영상들이 계속 쌓인다.
+    # 미디어 보관함 정리 — CapCut에서 지운 프로젝트의 영상이 계속 쌓이지 않게.
     if video.parent == cfg.media_dir:
-        _cleanup_media_dir(cfg.media_dir, keep=video)
+        removed = sweep_media_dir(cfg, keep=video)
+        if removed:
+            p.log(f"쓰이지 않는 영상 {len(removed)}개 정리: {', '.join(removed)}")
 
     job = cfg.work_dir / video.stem
     job.mkdir(parents=True, exist_ok=True)

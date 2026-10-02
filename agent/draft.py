@@ -674,6 +674,54 @@ def find_scaffold(drafts_dir: Path, *, exclude: str = "") -> Optional[Path]:
     return candidates[0][1]
 
 
+def find_referenced_media(drafts_dir: Path, names: Sequence[str]) -> Optional[set]:
+    """CapCut 프로젝트들이 아직 쓰고 있는 미디어 파일 이름을 가려냅니다.
+
+    names 중에서 휴지통(.recycle_bin)이 아닌 살아있는 프로젝트의 초안 파일에
+    이름이 등장하는 것만 돌려줍니다 — 우리 도구가 만든 초안이든 사용자가 CapCut에서
+    직접 만든 프로젝트든 구분하지 않습니다. 하나라도 읽지 못하면 None(판단 불가 —
+    호출하는 쪽은 아무것도 지우면 안 됨).
+
+    한글 파일명은 macOS가 NFD로 돌려주고 JSON엔 NFC로 적혀 있을 수 있어 두 형태를
+    모두 찾습니다.
+    """
+    if not drafts_dir.is_dir():
+        return None
+
+    files: List[Path] = []
+    try:
+        for proj in drafts_dir.iterdir():
+            # .recycle_bin(삭제한 프로젝트), .cloud_cache_* 등 숨김 폴더는 제외
+            if proj.name.startswith(".") or not proj.is_dir():
+                continue
+            for fname in ("draft_info.json", "draft_content.json", "draft_meta_info.json"):
+                if (proj / fname).is_file():
+                    files.append(proj / fname)
+            timelines = proj / "Timelines"
+            if timelines.is_dir():
+                files.extend(timelines.glob("*/draft_info.json"))
+                files.extend(timelines.glob("*/draft_content.json"))
+    except OSError:
+        return None
+
+    import unicodedata
+
+    forms = {
+        n: {unicodedata.normalize("NFC", n), unicodedata.normalize("NFD", n)} for n in names
+    }
+    used: set = set()
+    for f in files:
+        try:
+            raw = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        text = unicodedata.normalize("NFC", raw)
+        for n, variants in forms.items():
+            if n not in used and any(v in raw or v in text for v in variants):
+                used.add(n)
+    return used
+
+
 def resolve_drafts_dir(configured: str) -> Path:
     from .config import find_capcut_drafts
 
