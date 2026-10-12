@@ -262,8 +262,10 @@ def process(
         if Path(preset_path).is_file():
             try:
                 preset = draft.load_text_preset(Path(preset_path))
-                draft.apply_preset_style(seed, preset)
+                skipped = draft.apply_preset_style(seed, preset)
                 p.log(f"텍스트 사전 설정: {preset['name']}")
+                if skipped:
+                    p.log("적용하지 못한 사전 설정 속성: " + ", ".join(skipped))
             except (OSError, ValueError, KeyError) as exc:
                 p.log(f"텍스트 사전 설정을 못 읽어 기본 스타일로 갑니다 — {exc}")
         else:

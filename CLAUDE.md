@@ -195,6 +195,28 @@ pycapcut의 `create_draft()` 는 `draft_content.json`/`draft_meta_info.json` 만
 쉽습니다) — 그래서 복제 직후 `Timelines/` 를 통째로 지웁니다. CapCut이 열 때
 `draft_content.json` 기준으로 새로 만들어 줍니다.
 
+**8-1. 스캐폴드는 구조만 빌리고 내용물은 비운다 (`draft._sanitize_scaffold`)**
+스캐폴드(가장 최근 기존 초안)를 그대로 두면 그 프로젝트의 **미디어 목록**
+(`draft_meta_info.json` 의 `draft_materials` — CapCut 왼쪽 미디어 패널)과 작업
+흔적(`Resources/` wav, `video/figure_algorithm/`, `key_value.json`,
+`draft_virtual_store.json`, `draft_agency_config.json`, `attachment_id_mapping.json`)이
+통째로 딸려와서, 영상 하나만 넣었는데 지금까지 만든 모든 리소스가 프로젝트에
+들어가 있게 됩니다(2026-10-12 실제 사고). 복제 직후 이걸 전부 비우고 meta 의
+`draft_materials` 에 **이번 영상 하나만** 적습니다. 새 부속 파일을 다루게 되면
+"원래 프로젝트의 내용이 들어있는가?"를 먼저 확인하세요. 같은 이유로
+`find_referenced_media()` 의 사용 여부 판정도 이 meta 가 깨끗해야 맞습니다.
+
+**8-2. 텍스트 사전 설정은 속성별로 CapCut 네이티브 값과 대조해서 옮긴다**
+`apply_preset_style()` 의 필드 대응은 추측이 아니라, 사용자가 CapCut에서 같은
+사전 설정을 적용해 저장한 초안과 우리가 만든 초안을 필드 단위로 diff 해서 확인한
+것입니다: 테두리 = `styles[].strokes` + `border_*`, 굵게 = `styles[].bold` +
+`bold_width`(0.00800000037997961), 세로/가로 크기 = 세그먼트 `clip.scale` +
+`uniform_scale`, 위치 = `clip.transform`, 글로우 = `bloom` 이펙트 재료 +
+`extra_material_refs`, 그림자 `diffuse = smoothing/18`, `check_flag = 7 | 테두리 8 |
+그림자·굵게 32 | 글로우 64`. 말풍선/꽃 효과/곡선/배경 프레임은 대응을 못 찾아
+적용하지 않고 `apply_preset_style()` 반환값으로 알려줍니다(로그에 표시).
+새 속성을 추가할 땐 같은 방식으로 네이티브 초안과 먼저 대조하세요.
+
 ## UI 작업 규칙
 
 `DESIGN-framer.md` 가 디자인 시스템의 단일 출처입니다. `app/ui.html` 의 `:root` 에

@@ -239,10 +239,11 @@ def list_text_presets(drafts_dir: Path) -> List[Dict[str, str]]:
 
 
 def load_text_preset(path: Path) -> Dict[str, Any]:
-    """텍스트 사전 설정 파일 하나를 읽어 스타일 값과 폰트 경로를 뽑아냅니다."""
+    """텍스트 사전 설정 파일 하나를 읽어 스타일 값과 리소스(폰트/글로우)를 뽑아냅니다."""
     raw = _load_json(path)
+    resources = [r for r in (raw.get("resources") or []) if isinstance(r, dict)]
     font_path = ""
-    for res in raw.get("resources") or []:
+    for res in resources:
         if res.get("panel") == "fonts" and res.get("file_path"):
             font_path = res["file_path"]
             break
@@ -250,6 +251,8 @@ def load_text_preset(path: Path) -> Dict[str, Any]:
         "name": raw.get("name") or path.stem,
         "style": raw.get("style") or {},
         "font_path": font_path,
+        "resources": resources,
+        "cover_image_path": raw.get("cover_image_path") or "",
     }
 
 
@@ -263,89 +266,209 @@ def _hex_to_rgb01(hex_color: str) -> Optional[List[float]]:
         return None
 
 
-def apply_preset_style(seed: SeedStyle, preset: Dict[str, Any]) -> None:
-    """견본 스타일 위에 텍스트 사전 설정(.textpreset)의 색상/폰트/그림자 등을 입힙니다(제자리 수정).
+def _solid(rgb: List[float]) -> Dict[str, Any]:
+    return {"solid": {"color": rgb}, "render_type": "solid"}
 
-    .textpreset 은 draft_content.json 의 완전한 텍스트 조각 스키마와는 다른,
-    CapCut 자체의 단순화된 스타일 표현이라 통째로 갈아끼울 수 없습니다.
-    대신 실제 초안에서 뽑은 값과 직접 대조해 이름·단위가 정확히 같다고
-    확인된 필드(정렬/줄간격/자간/글자크기/색/그림자)만 seed 위에 덮어쓰고,
-    말풍선·곡선 텍스트·애니메이션처럼 대응 관계를 확인하지 못한 나머지는
-    건드리지 않은 채 seed 의 것을 그대로 둡니다. 실제로 렌더링에 쓰이는
-    쪽은 content(JSON 문자열) 안의 styles[] 이고, 문서 최상위 필드(text_color
-    등)는 CapCut 자체가 비워두는 경우도 있는 보조 기록이라 두 쪽 다 맞춰
-    씁니다.
+
+# 굵게(has_bold_width)일 때 CapCut이 실제로 적어 넣는 값 (사전 설정을 적용한 실제 초안에서 확인)
+_BOLD_WIDTH = 0.00800000037997961
+
+
+def apply_preset_style(seed: SeedStyle, preset: Dict[str, Any]) -> List[str]:
+    """견본 스타일 위에 텍스트 사전 설정(.textpreset)의 속성을 전부 입힙니다(제자리 수정).
+
+    .textpreset 은 draft_content.json 의 완전한 텍스트 스키마와 다른 CapCut 자체의
+    단순화된 표현입니다. 각 속성이 실제 초안에서 어떤 필드로 바뀌는지는, 사용자가
+    CapCut에서 같은 사전 설정을 적용해 저장한 초안과 우리가 만든 초안을 필드 단위로
+    대조해 확인한 대응만 씁니다:
+
+    - 글자: 크기/색/정렬/자간/줄간격/투명도/기울임/밑줄
+    - 폰트: apply_font_override 재사용
+    - 그림자: has_shadow + styles[].shadows[] (diffuse = smoothing/18 — 실제 값 3쌍으로 확인)
+    - 테두리(border): styles[].strokes[] + border_* (이전엔 빠져 있던 부분)
+    - 굵게: styles[].bold + bold_width
+    - 세로 크기/가로 크기·위치·회전: 세그먼트 clip.scale / clip.transform / uniform_scale
+    - 글로우(light_*): bloom 이펙트 재료를 새로 만들어 세그먼트에 연결
+    - check_flag: 7 | 테두리 8 | 그림자·굵게 32 | 글로우 64
+
+    반환값은 대응 관계를 확인하지 못해 적용하지 못한 속성의 설명 목록입니다
+    (말풍선/꽃 효과/곡선 텍스트/배경 프레임 — 해당 사전 설정에선 빠지므로 알려야 함).
     """
+    unsupported: List[str] = []
     font_path = preset.get("font_path") or ""
     if font_path:
         apply_font_override(seed, font_path)
-
     seed.description = str(preset.get("name") or seed.description)
 
-    style = preset.get("style") or {}
-    rgb = _hex_to_rgb01(style.get("color", ""))
-    has_shadow = bool(style.get("shadow_checked"))
-    shadow_rgb = _hex_to_rgb01(style.get("shadow_color", "")) if has_shadow else None
+    st = preset.get("style") or {}
+    rgb = _hex_to_rgb01(st.get("color", ""))
+    has_shadow = bool(st.get("shadow_checked"))
+    shadow_rgb = _hex_to_rgb01(st.get("shadow_color", "")) if has_shadow else None
+    has_border = bool(st.get("border_item_checked"))
+    border_rgb = _hex_to_rgb01(st.get("border_color", "")) if has_border else None
+    has_bold = bool(st.get("has_bold_width"))
+    has_glow = bool(st.get("light_checked")) and bool(st.get("light_res_id"))
+
+    if st.get("bubbleResId"):
+        unsupported.append("말풍선(텍스트 쉐이프)")
+    if st.get("flowerResId"):
+        unsupported.append("꽃 글자 효과")
+    if st.get("curve_enable") or st.get("curve_checked"):
+        unsupported.append("곡선 텍스트")
+    if st.get("frame_item_checked"):
+        unsupported.append("배경 프레임")
+
+    check_flag = 7
+    if has_border:
+        check_flag |= 8
+    if has_shadow or has_bold:
+        check_flag |= 32
+    if has_glow:
+        check_flag |= 64
 
     for item in seed.materials.get("texts", []):
-        if "font_size" in style:
-            item["font_size"] = float(style["font_size"])
-        if "alignment" in style:
-            item["alignment"] = int(style["alignment"])
-        if "line_spacing" in style:
-            item["line_spacing"] = float(style["line_spacing"])
-        if "letter_spacing" in style:
-            item["letter_spacing"] = float(style["letter_spacing"])
-        if "text_alpha" in style:
-            item["text_alpha"] = float(style["text_alpha"])
-        if "global_alpha" in style:
-            item["global_alpha"] = float(style["global_alpha"])
-        if "italic_degree" in style:
-            item["italic_degree"] = style["italic_degree"]
-        if rgb and style.get("color"):
-            item["text_color"] = style["color"]
+        for key, src in (("font_size", "font_size"), ("line_spacing", "line_spacing"),
+                         ("letter_spacing", "letter_spacing"), ("text_alpha", "text_alpha"),
+                         ("global_alpha", "global_alpha")):
+            if src in st:
+                item[key] = float(st[src])
+        if "alignment" in st:
+            item["alignment"] = int(st["alignment"])
+        if "italic_degree" in st:
+            item["italic_degree"] = st["italic_degree"]
+        if "has_underline" in st:
+            item["underline"] = bool(st["has_underline"])
+        if "type_setting" in st:
+            item["typesetting"] = int(st["type_setting"])
+        if rgb and st.get("color"):
+            item["text_color"] = st["color"]
+        item["use_effect_default_color"] = not has_glow
+
         item["has_shadow"] = has_shadow
         if has_shadow:
-            if style.get("shadow_color"):
-                item["shadow_color"] = style["shadow_color"]
-            if "shadow_alpha" in style:
-                item["shadow_alpha"] = float(style["shadow_alpha"])
-            if "shadow_angle" in style:
-                item["shadow_angle"] = float(style["shadow_angle"])
-            if "shadow_distance" in style:
-                item["shadow_distance"] = float(style["shadow_distance"])
+            if st.get("shadow_color"):
+                item["shadow_color"] = st["shadow_color"]
+            for key in ("shadow_alpha", "shadow_angle", "shadow_distance", "shadow_smoothing"):
+                if key in st:
+                    item[key] = float(st[key])
+
+        item["bold_width"] = _BOLD_WIDTH if has_bold else 0.0
+        if has_border:
+            item["border_alpha"] = 1.0
+            item["border_mode"] = 0
+            if st.get("border_color"):
+                item["border_color"] = st["border_color"]
+            if "border_width" in st:
+                item["border_width"] = float(st["border_width"])
+        item["check_flag"] = check_flag
 
         try:
             data = json.loads(item.get("content", ""))
         except (TypeError, ValueError):
             continue
-        changed = False
-        for s in data.get("styles") or []:
-            if "font_size" in style:
-                s["size"] = float(style["font_size"])
-                changed = True
+        for sty in data.get("styles") or []:
+            if "font_size" in st:
+                sty["size"] = float(st["font_size"])
             if rgb:
-                fill = s.setdefault("fill", {}).setdefault("content", {})
-                fill["render_type"] = "solid"
-                fill.setdefault("solid", {})["color"] = rgb
-                changed = True
-            shadows = s.get("shadows") or []
-            if has_shadow and shadows:
+                sty["fill"] = {"content": _solid(rgb)}
+            sty["useLetterColor"] = True
+
+            if has_shadow:
+                shadows = sty.get("shadows") or [{
+                    "thickness_projection_distance": 0, "thickness_projection_enable": False,
+                    "thickness_projection_angle": -45, "distance": 0, "diffuse": 0.04,
+                    "angle": -45, "alpha": 0.75, "content": _solid([0.0, 0.0, 0.0]),
+                }]
                 sh = shadows[0]
                 if shadow_rgb:
-                    sh.setdefault("content", {}).setdefault("solid", {})["color"] = shadow_rgb
-                if "shadow_alpha" in style:
-                    sh["alpha"] = float(style["shadow_alpha"])
-                if "shadow_angle" in style:
-                    sh["angle"] = float(style["shadow_angle"])
-                if "shadow_distance" in style:
-                    sh["distance"] = float(style["shadow_distance"])
-                changed = True
-            elif not has_shadow and shadows:
-                s["shadows"] = []
-                changed = True
-        if changed:
-            item["content"] = json.dumps(data, ensure_ascii=False)
+                    sh["content"] = _solid(shadow_rgb)
+                for key in ("shadow_alpha", "shadow_angle", "shadow_distance"):
+                    if key in st:
+                        sh[key.replace("shadow_", "")] = float(st[key])
+                if st.get("use_shadow_diffuse") and "shadow_smoothing" in st:
+                    sh["diffuse"] = float(st["shadow_smoothing"]) / 18.0
+                sty["shadows"] = [sh]
+            else:
+                sty.pop("shadows", None)
+
+            if has_border:
+                sty["strokes"] = [{
+                    "width": float(st.get("border_width", 0.0)), "mode": 0,
+                    "content": _solid(border_rgb or [0.0, 0.0, 0.0]),
+                }]
+            else:
+                sty.pop("strokes", None)
+
+            if has_bold:
+                sty["bold"] = True
+            else:
+                sty.pop("bold", None)
+        item["content"] = json.dumps(data, ensure_ascii=False)
+
+    # --- 세그먼트(위치/크기/회전) ---
+    seg = seed.segment
+    clip = seg.setdefault("clip", {})
+    scale = clip.setdefault("scale", {"x": 1.0, "y": 1.0})
+    trans = clip.setdefault("transform", {"x": 0.0, "y": 0.0})
+    if "scale_x" in st:
+        scale["x"] = float(st["scale_x"])
+    if "scale_y" in st:
+        scale["y"] = float(st["scale_y"])
+    if "transform_x" in st:
+        trans["x"] = float(st["transform_x"])
+    if "transform_y" in st:
+        trans["y"] = float(st["transform_y"])
+    if "rotation" in st:
+        clip["rotation"] = float(st["rotation"])
+    if "global_alpha" in st:
+        clip["alpha"] = float(st["global_alpha"])
+    if "uniform_scale_enabled" in st:
+        seg["uniform_scale"] = {
+            "on": bool(st["uniform_scale_enabled"]),
+            "value": (seg.get("uniform_scale") or {}).get("value", 1.0),
+        }
+
+    # --- 글로우: bloom 이펙트 재료 ---
+    effects = seed.materials.setdefault("effects", [])
+    old_blooms = {e.get("id") for e in effects if e.get("type") == "bloom"}
+    effects[:] = [e for e in effects if e.get("type") != "bloom"]
+    refs = [r for r in (seg.get("extra_material_refs") or []) if r not in old_blooms]
+    if has_glow:
+        res_id = str(st["light_res_id"])
+        glow_res = next((r for r in preset.get("resources", [])
+                         if r.get("panel") == "text_glow"), {})
+        cover = Path(preset.get("cover_image_path") or "")
+        effect_path = ""
+        if glow_res.get("file_path") and cover.parent.parent.name:
+            effect_path = str(cover.parent.parent / "effect" / res_id / glow_res["file_path"])
+        glow_id = uuid.uuid4().hex
+        effects.append({
+            "id": glow_id, "effect_id": res_id, "resource_id": res_id,
+            "third_resource_id": "", "name": "", "report_name": "", "type": "bloom",
+            "sub_type": "none", "path": effect_path, "value": 0.0, "visible": True,
+            "item_effect_type": 0, "category_id": "", "category_name": "",
+            "category_key": "", "sub_category_id": "", "sub_category_name": "",
+            "platform": "all", "apply_target_type": 0, "source_platform": 1,
+            "version": "", "adjust_params": [], "time_range": None, "formula_id": "",
+            "enable_skin_tone_correction": False, "algorithm_artifact_path": "",
+            "intensity_key": "", "face_adjust_params": [], "exclusion_group": [],
+            "panel_id": "text_glow",
+            "bloom_params": {
+                "color": st.get("light_color") or st.get("color") or "#ffffff",
+                "strength": float(st.get("light_strength", 0.5)),
+                "range": float(st.get("light_range", 0.2)),
+                "dir_x": float(st.get("light_hor_degree", 0.5)),
+                "dir_y": float(st.get("light_ver_degree", 0.5)),
+            },
+            "request_id": "", "color_match_info": None, "multi_language_current": "",
+            "lumi_hub_path": "", "covering_relation_change": 0,
+            "beauty_face_auto_preset_id": "", "beauty_body_auto_preset_id": "",
+            "beauty_face_auto_retouch_info": {"face_id": [], "beauty_face_auto_retouch_id": ""},
+            "smart_color_mode": 0, "is_from_intelligent_quality": False,
+        })
+        refs.append(glow_id)
+    seg["extra_material_refs"] = refs
+    return unsupported
 
 
 def _replace_text_content(raw: str, new_text: str) -> str:
@@ -535,6 +658,10 @@ def build(
         if stale_timelines.exists():
             shutil.rmtree(stale_timelines)
 
+        # 스캐폴드는 구조(어떤 파일이 있어야 CapCut이 여는지)만 빌려오는 것 —
+        # 원래 프로젝트의 미디어 목록/작업 흔적이 그대로 딸려오지 않게 비운다.
+        _sanitize_scaffold(draft_dir, material)
+
     # ---- 이 컴퓨터에 맞게 마무리 ----
     _finalize(content, draft_dir, draft_name, timeline, seed)
 
@@ -597,6 +724,99 @@ def _add_plain_subtitles(script, cues: Sequence[Cue], cfg: Dict[str, Any]) -> No
             clip_settings=ClipSettings(transform_y=transform_y),
         )
         script.add_segment(seg, track_name="자동 자막")
+
+
+def _sanitize_scaffold(draft_dir: Path, material) -> None:
+    """복제해 온 스캐폴드에서 원래 프로젝트의 내용물을 비우고 이 영상 하나만 남긴다.
+
+    스캐폴드(가장 최근 기존 초안)를 통째로 복사하면 CapCut의 '미디어' 목록
+    (draft_meta_info.json 의 draft_materials)과 작업 흔적(Resources/, video/,
+    key_value.json 등)까지 같이 와서, 영상 하나만 넣었는데 지금까지 만든 모든
+    리소스가 프로젝트에 들어가 있게 된다.
+    """
+    # 프로젝트가 만든 부산물(알고리즘 결과 wav 등) — 폴더 구조는 두고 파일만 지운다
+    for sub in ("Resources", "video", "matting", "smart_crop", "subdraft",
+                "adjust_mask", "qr_upload"):
+        root = draft_dir / sub
+        if not root.is_dir():
+            continue
+        for child in root.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+    if (draft_dir / "Resources").is_dir():
+        for sub in ("audioAlg", "combination", "digitalHuman", "videoAlg"):
+            (draft_dir / "Resources" / sub).mkdir(exist_ok=True)
+
+    def _rewrite(name: str, fn) -> None:
+        path = draft_dir / name
+        if not path.is_file():
+            return
+        try:
+            data = _load_json(path)
+        except (OSError, ValueError):
+            return
+        fn(data)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False)
+
+    now_s = int(time.time())
+    entry_id = str(material.material_id)
+    video_path = str(material.path)
+
+    def _meta(d: Dict[str, Any]) -> None:
+        entry = {
+            "ai_group_type": "", "create_time": -1,
+            "duration": int(material.duration), "enter_from": 0,
+            "extra_info": material.material_name, "file_Path": video_path,
+            "height": int(material.height), "id": entry_id,
+            "import_time": now_s, "import_time_ms": -1, "item_source": 1,
+            "material_color_tag": "", "md5": "", "metetype": "video",
+            "roughcut_time_range": {"duration": int(material.duration), "start": 0},
+            "sub_time_range": {"duration": -1, "start": -1},
+            "type": 0, "width": int(material.width),
+        }
+        buckets = d.get("draft_materials") or []
+        kept = {b.get("type"): b for b in buckets if isinstance(b, dict)}
+        d["draft_materials"] = [
+            {"type": t, "value": [entry] if t == 0 else []}
+            for t in sorted(set(kept) | {0, 1, 2, 3, 6, 7, 8})
+        ]
+        d["draft_materials_copied_info"] = []
+        d["draft_segment_extra_info"] = []
+        d["draft_removable_storage_device"] = ""
+
+    _rewrite("draft_meta_info.json", _meta)
+
+    def _vstore(d: Dict[str, Any]) -> None:
+        d["draft_materials"] = []
+        for bucket in d.get("draft_virtual_store") or []:
+            if bucket.get("type") == 1:
+                bucket["value"] = [{"child_id": entry_id, "parent_id": ""}]
+
+    _rewrite("draft_virtual_store.json", _vstore)
+
+    _rewrite("draft_agency_config.json", lambda d: d.__setitem__("marterials", []))
+    _rewrite("key_value.json", lambda d: d.clear())
+    _rewrite("common_attachment/attachment_id_mapping.json",
+             lambda d: d.__setitem__("id_mapping", {"mapping": []}))
+
+    def _editing(d: Dict[str, Any]) -> None:
+        ed = d.get("editing_draft")
+        if isinstance(ed, dict):
+            ed["paste_segment_list"] = []
+
+    _rewrite("attachment_editing.json", _editing)
+
+    settings = draft_dir / "draft_settings"
+    if settings.is_file():
+        settings.write_text(
+            "[General]\ncloud_last_modify_platform=mac\n"
+            f"draft_create_time={now_s}\ndraft_last_edit_time={now_s}\n"
+            "real_edit_keys=0\nreal_edit_seconds=0\ntimeline_use_split_scene=true\n",
+            encoding="utf-8",
+        )
 
 
 def _finalize(
