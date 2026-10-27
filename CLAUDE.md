@@ -206,6 +206,18 @@ pycapcut의 `create_draft()` 는 `draft_content.json`/`draft_meta_info.json` 만
 "원래 프로젝트의 내용이 들어있는가?"를 먼저 확인하세요. 같은 이유로
 `find_referenced_media()` 의 사용 여부 판정도 이 meta 가 깨끗해야 맞습니다.
 
+**8-3. 영상 재료에 "얼굴 보정은 이미 정해졌다"를 적는다 (`draft._opt_out_of_retouch`)**
+pycapcut 이 만든 영상 재료엔 `is_set_beauty_mode` 등이 없어서, CapCut이 초안을 열 때
+사용자의 기본 얼굴 보정 프리셋(`figure` 이펙트 13개 + `makeup_root`)을 **클립마다**
+붙입니다. 컷이 많은 초안(80조각 안팎)은 그 이펙트 1,000개 이상이 재생을 못 따라가
+**영상은 검고 소리만 나오는 구간**이 생깁니다(2026-10-28 "비버암흑기 극복": 재생 샘플링
+12회 중 4회 검정 → 이펙트를 뺀 복사본·새로 만든 초안은 12회 모두 정상). 그래서
+`is_set_beauty_mode=True, is_unified_beauty_mode=False, beauty_face_preset_infos=[]`
+등으로 적어 CapCut이 자동 보정을 얹지 않게 합니다. 보정이 꼭 필요하면 설정
+`draft.auto_retouch=true`(기본 false). 원본 영상 자체는 멀쩡했습니다(HEVC, 프레임
+간격·디코딩 오류 없음) — 비슷한 증상이면 먼저 `draft_info.json` 의 `materials.effects`
+개수부터 보세요.
+
 **8-2. 텍스트 사전 설정은 속성별로 CapCut 네이티브 값과 대조해서 옮긴다**
 `apply_preset_style()` 의 필드 대응은 추측이 아니라, 사용자가 CapCut에서 같은
 사전 설정을 적용해 저장한 초안과 우리가 만든 초안을 필드 단위로 diff 해서 확인한

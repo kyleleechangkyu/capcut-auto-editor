@@ -580,6 +580,7 @@ def build(
     seed: Optional[SeedStyle] = None,
     subtitle_cfg: Optional[Dict[str, Any]] = None,
     scaffold_dir: Optional[Path] = None,
+    auto_retouch: bool = False,
 ) -> BuildResult:
     from pycapcut import DraftFolder, VideoSegment, Timerange, TrackType
 
@@ -630,6 +631,9 @@ def build(
 
     # ---- 초안 파일로 내보내기 ----
     content = json.loads(script.dumps())
+
+    if not auto_retouch:
+        _opt_out_of_retouch(content)
 
     # ---- 자막: 견본이 있으면 그 조각을 통째로 복제 ----
     if cues and seed is not None:
@@ -724,6 +728,23 @@ def _add_plain_subtitles(script, cues: Sequence[Cue], cfg: Dict[str, Any]) -> No
             clip_settings=ClipSettings(transform_y=transform_y),
         )
         script.add_segment(seg, track_name="자동 자막")
+
+
+def _opt_out_of_retouch(content: Dict[str, Any]) -> None:
+    """영상 재료에 "얼굴 보정은 이미 정해졌다(없음)"고 적어 CapCut이 자동 보정을 얹지 못하게 한다.
+
+    이 필드가 없으면 CapCut이 초안을 열 때 사용자의 기본 얼굴 보정 프리셋(figure 이펙트
+    13개 + makeup_root)을 클립마다 붙인다. 컷이 많은(80조각 안팎) 초안에선 그 이펙트
+    수백~천 개가 재생을 못 따라가 영상은 검고 소리만 나오는 구간이 생긴다.
+    """
+    for mat in content.get("materials", {}).get("videos", []):
+        mat["is_set_beauty_mode"] = True
+        mat["is_unified_beauty_mode"] = False
+        mat["beauty_face_preset_infos"] = []
+        mat["beauty_face_auto_preset_infos"] = []
+        mat["beauty_face_auto_preset"] = {"preset_id": "", "name": "", "rate_map": "", "scene": ""}
+        mat["beauty_body_preset_id"] = ""
+        mat["beauty_body_auto_preset"] = None
 
 
 def _sanitize_scaffold(draft_dir: Path, material) -> None:

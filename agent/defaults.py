@@ -52,6 +52,7 @@ DEFAULTS = {
         "height": 1920,
         "fps": 30,
         "fit": "auto",
+        "auto_retouch": False,   # True 면 CapCut이 기본 얼굴 보정을 클립마다 자동으로 얹도록 둔다
     },
 }
 

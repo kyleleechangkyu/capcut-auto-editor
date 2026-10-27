@@ -307,6 +307,7 @@ def process(
         seed=seed,
         subtitle_cfg=sub,
         scaffold_dir=scaffold_dir,
+        auto_retouch=bool(d.get("auto_retouch", False)),
     )
     p.stage("draft", built.draft_name, 1.0)
 
