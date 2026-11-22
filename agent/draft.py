@@ -289,10 +289,11 @@ def apply_preset_style(seed: SeedStyle, preset: Dict[str, Any]) -> List[str]:
     - 굵게: styles[].bold + bold_width
     - 세로 크기/가로 크기·위치·회전: 세그먼트 clip.scale / clip.transform / uniform_scale
     - 글로우(light_*): bloom 이펙트 재료를 새로 만들어 세그먼트에 연결
-    - check_flag: 7 | 테두리 8 | 그림자·굵게 32 | 글로우 64
+    - 텍스트 배경: frame_* → background_*
+    - check_flag: 7 | 테두리 8 | 배경 16 | 그림자·굵게 32 | 글로우 64
 
     반환값은 대응 관계를 확인하지 못해 적용하지 못한 속성의 설명 목록입니다
-    (말풍선/꽃 효과/곡선 텍스트/배경 프레임 — 해당 사전 설정에선 빠지므로 알려야 함).
+    (말풍선/꽃 효과/곡선 텍스트 — 해당 사전 설정에선 빠지므로 알려야 함).
     """
     unsupported: List[str] = []
     font_path = preset.get("font_path") or ""
@@ -308,6 +309,7 @@ def apply_preset_style(seed: SeedStyle, preset: Dict[str, Any]) -> List[str]:
     border_rgb = _hex_to_rgb01(st.get("border_color", "")) if has_border else None
     has_bold = bool(st.get("has_bold_width"))
     has_glow = bool(st.get("light_checked")) and bool(st.get("light_res_id"))
+    has_frame = bool(st.get("frame_item_checked"))
 
     if st.get("bubbleResId"):
         unsupported.append("말풍선(텍스트 쉐이프)")
@@ -315,8 +317,6 @@ def apply_preset_style(seed: SeedStyle, preset: Dict[str, Any]) -> List[str]:
         unsupported.append("꽃 글자 효과")
     if st.get("curve_enable") or st.get("curve_checked"):
         unsupported.append("곡선 텍스트")
-    if st.get("frame_item_checked"):
-        unsupported.append("배경 프레임")
 
     check_flag = 7
     if has_border:
@@ -325,6 +325,8 @@ def apply_preset_style(seed: SeedStyle, preset: Dict[str, Any]) -> List[str]:
         check_flag |= 32
     if has_glow:
         check_flag |= 64
+    if has_frame:
+        check_flag |= 16
 
     for item in seed.materials.get("texts", []):
         for key, src in (("font_size", "font_size"), ("line_spacing", "line_spacing"),
@@ -342,7 +344,21 @@ def apply_preset_style(seed: SeedStyle, preset: Dict[str, Any]) -> List[str]:
             item["typesetting"] = int(st["type_setting"])
         if rgb and st.get("color"):
             item["text_color"] = st["color"]
-        item["use_effect_default_color"] = not has_glow
+        item["use_effect_default_color"] = not (has_glow or has_frame)
+
+        # 텍스트 배경(사전 설정의 frame_*) → 재료의 background_* (CapCut이 같은 사전 설정을
+        # 적용해 저장한 초안과 필드 단위로 대조해 확인한 대응)
+        if has_frame:
+            item["background_color"] = st.get("frame_color", "")
+            item["background_alpha"] = float(st.get("frame_alpha", 1.0))
+            item["background_style"] = int(st.get("frame_style", 1))
+            item["background_width"] = float(st.get("frame_width", 0.1))
+            item["background_height"] = float(st.get("frame_height", 0.1))
+            item["background_horizontal_offset"] = float(st.get("frame_horizontal_offset", 0.0))
+            item["background_vertical_offset"] = float(st.get("frame_vertical_offset", 0.0))
+        else:
+            item["background_color"] = ""
+            item["background_style"] = 0
 
         item["has_shadow"] = has_shadow
         if has_shadow:
