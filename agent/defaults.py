@@ -46,6 +46,16 @@ DEFAULTS = {
         "font_size": 8.0,
     },
 
+    # 레퍼런스 패턴 반영 — 내가 마무리한 프로젝트에서 읽은 키워드 자막/효과음/컷 기준을 따라 한다
+    "style_learning": {
+        "enabled": False,
+        "keywords": True,
+        "sfx": True,
+        "cut": True,
+        "keyword_per_min": 0,     # 0 이면 학습한 값을 씀
+        "references": [],         # 레퍼런스 영상(mp4) 경로들 — 같은 이름의 CapCut 프로젝트를 찾아 읽음
+    },
+
     "draft": {
         "name_pattern": "{name}_auto_{time}",
         "width": 1080,

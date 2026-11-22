@@ -184,6 +184,9 @@ def _result_payload(r) -> Dict[str, Any]:
     ]
 
     return {
+        "learned": r.learned,
+        "keywords": [{"start": k.start, "text": k.text, "tier": k.tier} for k in r.keywords],
+        "sfx_count": r.sfx_count,
         "draft_name": r.draft_name,
         "draft_dir": str(r.draft_dir),
         "style_note": r.style_note,
@@ -245,6 +248,40 @@ def _checks(cfg) -> List[Dict[str, Any]]:
         "hint": "" if ok else "CapCut을 한 번 실행해 프로젝트를 하나 만든 뒤 새로고침해 주세요.",
     })
     return out
+
+
+def _style_summary() -> Dict[str, Any]:
+    from agent import style_profile
+
+    return style_profile.summarize(style_profile.load_profile())
+
+
+def _analyze_style(cfg, references: List[str]) -> Dict[str, Any]:
+    """레퍼런스(mp4 경로)와 같은 이름의 CapCut 프로젝트를 읽어 편집 패턴 프로필을 만든다."""
+    import unicodedata
+
+    from agent import draft as draft_mod
+    from agent import style_profile
+
+    drafts = cfg.get("capcut_drafts") or ""
+    if not drafts or not Path(drafts).is_dir():
+        return {"ok": False, "message": "CapCut 초안 폴더를 찾지 못했습니다."}
+    drafts_dir = Path(drafts)
+    found, skipped = style_profile.resolve_references(references, drafts_dir)
+    if not found:
+        return {"ok": False, "message": "레퍼런스와 같은 이름의 CapCut 프로젝트를 하나도 찾지 못했습니다.",
+                "skipped": skipped}
+    presets = []
+    for item in draft_mod.list_text_presets(drafts_dir):
+        try:
+            presets.append(draft_mod.load_text_preset(Path(item["path"])))
+        except (OSError, ValueError):
+            continue
+    auto = [d for d in drafts_dir.iterdir()
+            if d.is_dir() and "_auto_" in unicodedata.normalize("NFC", d.name)]
+    profile = style_profile.learn(found, presets, cut_dirs=auto or found)
+    style_profile.save_profile(profile)
+    return {"ok": True, "skipped": skipped, "profile": style_profile.summarize(profile)}
 
 
 def _list_text_presets(cfg) -> List[Dict[str, str]]:
@@ -355,6 +392,8 @@ class Handler(BaseHTTPRequestHandler):
                 "presets": cfg.get("presets"),
                 "preset_options": {k: list(v.keys()) for k, v in PRESETS.items()},
                 "subtitle": cfg.get_path("subtitle", {}),
+                "style_learning": cfg.get_path("style_learning", {}),
+                "style_profile": _style_summary(),
                 "transcribe_prompt": cfg.get_path("transcribe.initial_prompt", ""),
                 "platform": sys.platform,
                 "stages": [{"key": k, "label": l} for k, l in _stages()],
@@ -420,6 +459,21 @@ class Handler(BaseHTTPRequestHandler):
                 JOBS[job.id] = job
             threading.Thread(target=_run_job, args=(job,), daemon=True).start()
             self._json({"id": job.id})
+            return
+
+        if route == "/api/style/analyze":
+            body = self._json_body()
+            cfg = config_mod.load()
+            refs = body.get("references")
+            if refs is None:
+                refs = cfg.get_path("style_learning.references", []) or []
+            refs = [str(r).strip() for r in refs if str(r).strip()]
+            config_mod.save_user_settings({"style_learning": {"references": refs}})
+            try:
+                self._json(_analyze_style(cfg, refs))
+            except Exception as exc:  # noqa: BLE001
+                traceback.print_exc()
+                self._json({"ok": False, "message": f"분석 중 오류: {exc}"})
             return
 
         if route == "/api/settings":

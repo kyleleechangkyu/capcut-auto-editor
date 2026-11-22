@@ -8,9 +8,9 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Any, Callable, List, Optional
 
-from . import audio, detect, draft, report, subtitles, transcribe
+from . import audio, detect, draft, keywords as keywords_mod, report, style_profile, subtitles, transcribe
 from .config import Config
 
 # 단계 정의 — 화면의 진행 표시와 1:1로 대응합니다
@@ -53,6 +53,9 @@ class RunResult:
     elapsed: float = 0.0
     style_note: str = ""
     info: Optional[audio.MediaInfo] = None
+    keywords: List[Any] = field(default_factory=list)
+    sfx_count: int = 0
+    learned: str = ""
 
 
 def sweep_media_dir(
@@ -214,12 +217,25 @@ def process(
         cuts += found
         p.log(f"재촬영(NG) {len(found)}곳")
 
+    # 레퍼런스 패턴 반영(화면의 토글) — 학습한 프로필이 있을 때만
+    sl = cfg.get_path("style_learning", {}) or {}
+    profile = style_profile.load_profile() if sl.get("enabled") else None
+    if sl.get("enabled") and not profile:
+        p.log("레퍼런스 패턴 반영이 켜져 있지만 분석한 프로필이 없습니다 — 화면에서 '패턴 분석'을 먼저 해주세요")
+    min_clip = float(cut_cfg.get("min_clip", 0.30))
+    if profile and sl.get("cut", True) and (profile.get("cut") or {}).get("min_clip"):
+        learned_min = float(profile["cut"]["min_clip"])
+        if learned_min > min_clip:
+            min_clip = learned_min
+            p.log(f"레퍼런스 패턴: 최소 클립 길이 {learned_min:.1f}초 "
+                  f"(0.5초 미만 조각의 {int(profile['cut'].get('short_clip_removed_rate', 0) * 100)}%를 직접 지웠음)")
+
     plan = detect.build_plan(
         info.duration,
         cuts,
         lead_in=float(cut_cfg.get("lead_in", 0.08)),
         lead_out=float(cut_cfg.get("lead_out", 0.14)),
-        min_clip=float(cut_cfg.get("min_clip", 0.30)),
+        min_clip=min_clip,
         merge_gap=float(cut_cfg.get("merge_gap", 0.18)),
         fps=info.fps,
     )
@@ -294,6 +310,25 @@ def process(
         ),
     )
 
+    kw_list: List[Any] = []
+    kw_seed = None
+    kw_big = None
+    sfx_templates: List[Any] = []
+    if profile and cues and sl.get("keywords", True):
+        kwp = profile.get("keyword") or {}
+        preset = next((x for x in draft.list_text_presets(drafts_dir)
+                       if x["name"] == kwp.get("preset_name")), None)
+        if preset is None:
+            p.log("레퍼런스 패턴: 키워드 자막에 쓸 텍스트 사전 설정을 찾지 못해 키워드를 건너뜁니다")
+        else:
+            kw_seed = draft.default_text_style()
+            if kw_seed is not None:
+                draft.apply_preset_style(kw_seed, draft.load_text_preset(Path(preset["path"])))
+                kw_big = float(kwp.get("size_big") or 0) or None
+                per_min = float(sl.get("keyword_per_min") or kwp.get("per_min") or 10)
+                kw_list = keywords_mod.pick(cues, per_min=per_min, max_chars=int(kwp.get("max_chars", 10)))
+                if profile.get("sfx") and sl.get("sfx", True):
+                    sfx_templates = list((profile["sfx"].get("templates")) or [])
     built = draft.build(
         info=info,
         plan=plan,
@@ -308,8 +343,16 @@ def process(
         subtitle_cfg=sub,
         scaffold_dir=scaffold_dir,
         auto_retouch=bool(d.get("auto_retouch", False)),
+        keywords=kw_list,
+        keyword_seed=kw_seed,
+        keyword_size_big=kw_big,
+        sfx_templates=sfx_templates,
     )
     p.stage("draft", built.draft_name, 1.0)
+    if kw_list:
+        strong = keywords_mod.broll_candidates(kw_list)
+        p.log(f"레퍼런스 패턴: 키워드 자막 {built.keyword_count}개 · 효과음 {built.sfx_count}개 · "
+              f"B-roll 후보 {len(strong)}곳")
 
     report.write_json(plan, cues, job / "cuts.json")
     md = report.write_markdown(
@@ -328,6 +371,9 @@ def process(
         elapsed=time.time() - t0,
         style_note=built.style_note,
         info=info,
+        keywords=kw_list,
+        sfx_count=built.sfx_count,
+        learned=(f"키워드 {built.keyword_count} · 효과음 {built.sfx_count}" if kw_list else ""),
     )
 
 

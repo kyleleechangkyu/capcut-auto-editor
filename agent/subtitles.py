@@ -6,7 +6,7 @@ import bisect
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 
 from . import korean_break
 from .detect import CutPlan
@@ -22,6 +22,8 @@ class Cue:
     start: float
     end: float
     text: str
+    # 어절별 (알맹이, 종류) — 형태소 분석기가 있을 때만(keywords.py 가 키워드 고를 때 씀)
+    infos: Optional[List[tuple]] = None
 
     @property
     def duration(self) -> float:
@@ -77,7 +79,7 @@ def build_cues(
     # 분석기가 없거나(java/jar 미설치) 발화의 어절 수와 분석 결과가 안 맞으면
     # 그 발화는 그냥 None(전부 안 끊음)으로 두고 문장부호/글자수 기준만 씁니다.
     utt_lines = [" ".join(w.text for w in utt.words) for utt in utterances]
-    break_results = korean_break.analyze_lines(utt_lines) if utt_lines else None
+    break_results = korean_break.analyze_lines_full(utt_lines) if utt_lines else None
 
     # 잘려나가지 않고 살아남은 단어만, 발화 구분 없이 시간순으로 모읍니다.
     # 각 항목은 (시작, 끝, 글자, 형태소 분석상 끊기 좋은 지점인지).
@@ -98,8 +100,9 @@ def build_cues(
             original = max(1e-6, w.end - w.start)
             if (span[1] - span[0]) / original < 0.55:
                 continue
-            prefer_break = bool(flags[wi]) if flags is not None else False
-            utt_mapped.append((span[0], span[1], w.text, prefer_break))
+            prefer_break = bool(flags[wi].flag) if flags is not None else False
+            info = (flags[wi].stem, flags[wi].kind) if flags is not None else None
+            utt_mapped.append((span[0], span[1], w.text, prefer_break, info))
 
         if utt_mapped:
             mapped.extend(utt_mapped)
@@ -110,7 +113,7 @@ def build_cues(
                 continue
             text = _clean(utt.text, strip_punctuation)
             if text:
-                mapped.append((span[0], span[1], text, False))
+                mapped.append((span[0], span[1], text, False, None))
 
     mapped.sort(key=lambda item: item[0])
 
@@ -155,22 +158,29 @@ def build_cues(
     # 막으면 내용이 짧은 자막 뒤에 다시 공백이 남기 때문입니다. 영상은 컷
     # 편집으로 끊김 없이 이어 붙으므로, 화면이 비는 것보다 이전 자막이 좀 더
     # 오래 떠 있는 쪽이 낫다고 봅니다.
+    # 자막 바는 비는 곳 없이 전부 채웁니다(여러 번 요청받음): 각 클립의 첫 자막은
+    # 클립 시작부터, 그 외엔 앞 자막이 다음 자막 시작까지, 마지막은 편집본 끝까지.
+    # 자막은 클립 경계에서 항상 끊기므로(위 new_clip), 바 경계 = 클립 경계로
+    # 맞춰지고 그 사이에 구멍이 없습니다.
+    prev_clip = -1
+    for c in cues:
+        ci = _keep_index(c.start)
+        if ci != prev_clip and keep_starts:
+            c.start = min(c.start, keep_starts[ci])
+        prev_clip = ci
     for i, c in enumerate(cues):
-        # 마지막 자막은 다음 자막이 없으니 편집본 전체 길이가 상한입니다
-        # (없으면 영상이 끝난 뒤까지 자막이 늘어날 수 있음). 그리고 항상
-        # 지금 클립의 끝을 넘지 않게 상한을 둡니다 — 텍스트 바가 다음 클립
-        # 으로 넘어가지 않도록.
         next_start = cues[i + 1].start if i + 1 < len(cues) else plan.kept_duration
-        clip_end = keep_ends[_keep_index(c.start)] if keep_ends else next_start
-        cap = min(next_start, clip_end)
-        c.end = max(cap - 0.001, c.start)
+        c.end = max(next_start, c.start)
+    if cues and keep_starts:
+        cues[0].start = 0.0
 
-    return [c for c in cues if c.duration > 0.1]
+    return [c for c in cues if c.duration > 0.05]
 
 
 def _make_cue(line: List[tuple], strip_punct: bool) -> Cue:
     text = _clean(" ".join(w[2] for w in line), strip_punct)
-    return Cue(line[0][0], line[-1][1], text)
+    infos = [w[4] for w in line] if all(len(w) > 4 and w[4] for w in line) else None
+    return Cue(line[0][0], line[-1][1], text, infos)
 
 
 def _srt_time(t: float) -> str:

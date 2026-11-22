@@ -5,6 +5,7 @@ __pycache__/
 
 # 이 컴퓨터에서만 의미 있는 것들
 settings.json
+style_profile.json
 media/
 work/
 testdrafts/

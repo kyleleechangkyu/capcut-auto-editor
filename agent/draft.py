@@ -20,7 +20,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .audio import MediaInfo
 from .detect import CutPlan
@@ -564,6 +564,8 @@ class BuildResult:
     clip_count: int
     cue_count: int
     style_note: str
+    keyword_count: int = 0
+    sfx_count: int = 0
 
 
 def build(
@@ -581,6 +583,10 @@ def build(
     subtitle_cfg: Optional[Dict[str, Any]] = None,
     scaffold_dir: Optional[Path] = None,
     auto_retouch: bool = False,
+    keywords: Sequence[Any] = (),
+    keyword_seed: Optional[SeedStyle] = None,
+    keyword_size_big: Optional[float] = None,
+    sfx_templates: Sequence[Dict[str, Any]] = (),
 ) -> BuildResult:
     from pycapcut import DraftFolder, VideoSegment, Timerange, TrackType
 
@@ -640,6 +646,14 @@ def build(
         content = _inject_seed_subtitles(content, seed, cues)
         style_note = f"견본 스타일 사용 ({seed.description})"
 
+    keyword_count = sfx_count = 0
+    sfx_used: List[Dict[str, Any]] = []
+    if keywords and keyword_seed is not None:
+        content, kept = _inject_keywords(content, keyword_seed, keywords, keyword_size_big)
+        keyword_count = len(kept)
+        if sfx_templates and kept:
+            content, sfx_count, sfx_used = _inject_sfx(content, sfx_templates, [k.start for k in kept])
+
     # ---- CapCut이 실제로 요구하는 부속 파일을 진짜 초안에서 통째로 가져옵니다 ----
     # pycapcut의 create_draft() 는 draft_content.json / draft_meta_info.json 만 만드는데,
     # 최신 CapCut은 draft_info.json 을 비롯해 Resources/, Timelines/, draft_virtual_store.json 등
@@ -664,7 +678,7 @@ def build(
 
         # 스캐폴드는 구조(어떤 파일이 있어야 CapCut이 여는지)만 빌려오는 것 —
         # 원래 프로젝트의 미디어 목록/작업 흔적이 그대로 딸려오지 않게 비운다.
-        _sanitize_scaffold(draft_dir, material)
+        _sanitize_scaffold(draft_dir, material, [t.get("meta_entry") for t in sfx_used])
 
     # ---- 이 컴퓨터에 맞게 마무리 ----
     _finalize(content, draft_dir, draft_name, timeline, seed)
@@ -680,6 +694,8 @@ def build(
         clip_count=len(plan.keeps),
         cue_count=cue_count,
         style_note=style_note,
+        keyword_count=keyword_count,
+        sfx_count=sfx_count,
     )
 
 
@@ -691,7 +707,8 @@ def _inject_seed_subtitles(
 
     for cue in cues:
         start_us = int(round(cue.start * US))
-        dur_us = max(1, int(round(cue.duration * US)))
+        # 끝을 따로 반올림해 빼야 앞 자막 끝 = 다음 자막 시작이 1µs도 안 어긋남(겹침 오류 방지)
+        dur_us = max(1, int(round(cue.end * US)) - start_us)
         seg, mats = _clone_text_segment(seed, cue.text, start_us, dur_us)
         segments.append(seg)
         for bucket, items in mats.items():
@@ -708,6 +725,103 @@ def _inject_seed_subtitles(
         "render_index": seed.render_index,
     })
     return content
+
+
+def _scaled_seed(seed: SeedStyle, size: float) -> SeedStyle:
+    """같은 사전 설정에서 글자 크기만 키운 견본(강한 키워드용)."""
+    big = copy.deepcopy(seed)
+    for item in big.materials.get("texts", []):
+        item["font_size"] = float(size)
+        try:
+            data = json.loads(item.get("content", ""))
+        except (TypeError, ValueError):
+            continue
+        for sty in data.get("styles") or []:
+            sty["size"] = float(size)
+        item["content"] = json.dumps(data, ensure_ascii=False)
+    return big
+
+
+def _inject_keywords(
+    content: Dict[str, Any], seed: SeedStyle, keywords: Sequence[Any], size_big: Optional[float]
+) -> Tuple[Dict[str, Any], List[Any]]:
+    """키워드 자막 트랙을 따로 추가합니다(같은 트랙 안에서 겹치지 않게 다음 키워드 앞에서 끊음)."""
+    ordered = sorted(keywords, key=lambda k: k.start)
+    big_seed = _scaled_seed(seed, size_big) if size_big else seed
+    segments: List[Dict[str, Any]] = []
+    materials = content.setdefault("materials", {})
+    kept: List[Any] = []
+    for i, k in enumerate(ordered):
+        end = min(k.end, ordered[i + 1].start) if i + 1 < len(ordered) else k.end
+        start_us = int(round(k.start * US))
+        dur_us = int(round(end * US)) - start_us
+        if dur_us < int(0.3 * US):
+            continue
+        seg, mats = _clone_text_segment(big_seed if k.tier else seed, k.text, start_us, dur_us)
+        segments.append(seg)
+        kept.append(k)
+        for bucket, items in mats.items():
+            materials.setdefault(bucket, []).extend(items)
+    if segments:
+        content.setdefault("tracks", []).append({
+            "attribute": 0, "flag": 0, "id": uuid.uuid4().hex, "is_default_name": True,
+            "name": "자동 키워드", "segments": segments, "type": "text",
+            "render_index": seed.render_index + 1000,
+        })
+    return content, kept
+
+
+def _inject_sfx(
+    content: Dict[str, Any], templates: Sequence[Dict[str, Any]], times: Sequence[float]
+) -> Tuple[Dict[str, Any], int, List[Dict[str, Any]]]:
+    """효과음 트랙 — 학습해 둔 효과음 견본(CapCut 캐시의 mp3)을 키워드 시작마다 복제해 얹는다."""
+    usable = [t for t in templates if Path(t.get("audio", {}).get("path", "")).is_file()]
+    if not usable:
+        return content, 0, []
+    materials = content.setdefault("materials", {})
+    segments: List[Dict[str, Any]] = []
+    used: Dict[str, Dict[str, Any]] = {}
+    prev_end = -1
+    for i, t0 in enumerate(sorted(times)):
+        tpl = usable[0] if (len(usable) == 1 or i % 3) else usable[1]
+        start_us = int(round(t0 * US))
+        dur_us = int(tpl["segment"]["source_timerange"]["duration"])
+        if start_us < prev_end:
+            continue
+        prev_end = start_us + dur_us
+
+        ids: Dict[str, str] = {}
+
+        def fresh(old: str) -> str:
+            ids.setdefault(old, uuid.uuid4().hex)
+            return ids[old]
+
+        audio = copy.deepcopy(tpl["audio"])
+        audio["id"] = fresh(audio["id"])
+        materials.setdefault("audios", []).append(audio)
+        refs: List[str] = []
+        for bucket, items in tpl["materials"].items():
+            for it in items:
+                it = copy.deepcopy(it)
+                it["id"] = fresh(it["id"])
+                materials.setdefault(bucket, []).append(it)
+                refs.append(it["id"])
+        seg = copy.deepcopy(tpl["segment"])
+        seg["id"] = uuid.uuid4().hex
+        seg["material_id"] = audio["id"]
+        seg["extra_material_refs"] = refs
+        seg["target_timerange"] = {"start": start_us, "duration": dur_us}
+        seg["render_timerange"] = {"start": 0, "duration": 0}
+        seg["common_keyframes"] = []
+        seg["keyframe_refs"] = []
+        segments.append(seg)
+        used[tpl["audio"].get("path", "")] = tpl
+    if segments:
+        content.setdefault("tracks", []).append({
+            "attribute": 0, "flag": 0, "id": uuid.uuid4().hex, "is_default_name": True,
+            "name": "효과음", "segments": segments, "type": "audio",
+        })
+    return content, len(segments), list(used.values())
 
 
 def _add_plain_subtitles(script, cues: Sequence[Cue], cfg: Dict[str, Any]) -> None:
@@ -747,7 +861,7 @@ def _opt_out_of_retouch(content: Dict[str, Any]) -> None:
         mat["beauty_body_auto_preset"] = None
 
 
-def _sanitize_scaffold(draft_dir: Path, material) -> None:
+def _sanitize_scaffold(draft_dir: Path, material, sound_meta: Sequence[Optional[Dict[str, Any]]] = ()) -> None:
     """복제해 온 스캐폴드에서 원래 프로젝트의 내용물을 비우고 이 영상 하나만 남긴다.
 
     스캐폴드(가장 최근 기존 초안)를 통째로 복사하면 CapCut의 '미디어' 목록
@@ -800,8 +914,12 @@ def _sanitize_scaffold(draft_dir: Path, material) -> None:
         }
         buckets = d.get("draft_materials") or []
         kept = {b.get("type"): b for b in buckets if isinstance(b, dict)}
+        sounds = []
+        for m in sound_meta:
+            if m and m.get("file_Path") not in {x.get("file_Path") for x in sounds}:
+                sounds.append(m)
         d["draft_materials"] = [
-            {"type": t, "value": [entry] if t == 0 else []}
+            {"type": t, "value": [entry] if t == 0 else (sounds if t == 8 else [])}
             for t in sorted(set(kept) | {0, 1, 2, 3, 6, 7, 8})
         ]
         d["draft_materials_copied_info"] = []

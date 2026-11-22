@@ -40,7 +40,12 @@ public class BreakAnalyzer {
                         String morph = last == null ? "" : last.getMorpheme();
                         String tag = last == null ? "" : last.getTag();
                         String rawTag = last == null ? "" : last.getRawTag();
-                        out.println(w.getOriginalWord() + "\t" + morph + "\t" + tag + "\t" + rawTag);
+                        StringBuilder all = new StringBuilder();
+                        for (TaggedMorpheme m : w) {
+                            if (all.length() > 0) all.append(' ');
+                            all.append(m.getMorpheme()).append('/').append(m.getTag());
+                        }
+                        out.println(w.getOriginalWord() + "\t" + morph + "\t" + tag + "\t" + rawTag + "\t" + all);
                     }
                     out.println("###SENT###");
                 }

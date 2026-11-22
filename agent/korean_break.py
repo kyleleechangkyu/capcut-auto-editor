@@ -19,10 +19,14 @@ java/jar가 없는 환경에서 파이프라인이 죽으면 안 됩니다.
 
 from __future__ import annotations
 
+import os
 import shutil
+import signal
 import subprocess
+import time
 from pathlib import Path
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 _APP_ROOT = Path(__file__).resolve().parent.parent
 _JAR_PATH = _APP_ROOT / "KoreanAnalyzer-master" / "KoreanAnalyzer-0.2.2.3-jar-with-dependencies.jar"
@@ -34,17 +38,29 @@ _BREAK_PREFIXES = ("EF",)
 # 등 일반 조사는 포함하지 않습니다 — 그건 문장이 계속 이어지는 자리라서.
 _BREAK_EXACT = {"JX", "JXC"}
 
-_JAVA_CANDIDATES = ["java", "/opt/homebrew/opt/openjdk/bin/java", "/usr/local/opt/openjdk/bin/java"]
+_JAVA_CANDIDATES = ["/opt/homebrew/opt/openjdk/bin/java", "/usr/local/opt/openjdk/bin/java", "java"]
+_JAVA_CACHE: dict = {}
+
+
+def _runs(path: str) -> bool:
+    """macOS 의 /usr/bin/java 는 JDK 가 없으면 곧바로 오류로 끝나는 껍데기라, 실제로 도는지 본다."""
+    try:
+        return subprocess.run([path, "-version"], capture_output=True, timeout=15).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _find_java() -> Optional[str]:
+    if "path" in _JAVA_CACHE:
+        return _JAVA_CACHE["path"]
+    found = None
     for cand in _JAVA_CANDIDATES:
-        found = shutil.which(cand)
-        if found:
-            return found
-        if Path(cand).is_file():
-            return cand
-    return None
+        path = cand if Path(cand).is_file() else shutil.which(cand)
+        if path and _runs(path):
+            found = path
+            break
+    _JAVA_CACHE["path"] = found
+    return found
 
 
 def available() -> bool:
@@ -56,6 +72,54 @@ def available() -> bool:
     )
 
 
+@dataclass
+class WordInfo:
+    """어절 하나의 분석 결과."""
+    flag: bool   # 이 어절 뒤에서 끊기 좋은가
+    stem: str    # 조사·어미를 뗀 알맹이(명사류). 명사류가 아니면 원래 어절
+    kind: str    # "noun" | "foreign"(영문) | "number" | "other"
+
+
+def _word_info(word: str, tag: str, morphs: str) -> WordInfo:
+    flag = tag in _BREAK_EXACT or any(tag.startswith(p) for p in _BREAK_PREFIXES)
+    pairs: List[Tuple[str, str]] = []
+    for item in morphs.split():
+        m, _, t = item.rpartition("/")
+        pairs.append((m, t))
+    if not pairs:
+        return WordInfo(flag, word, "other")
+
+    first = pairs[0][1]
+    if first in ("OL", "OH"):
+        kind = "foreign"
+    elif first in ("NR", "SN"):
+        kind = "number"
+    elif first.startswith("NN") or first == "XR":
+        kind = "noun"
+    else:
+        return WordInfo(flag, word, "other")
+    # 명사 뒤에 서술 요소(이더라/하다/되다 같은 용언·어미)가 붙은 어절은 서술어다 — 키워드 후보에서 뺀다
+    if any(t.startswith("E") or t in ("VCP", "VCN", "XSV", "XSA", "VX", "VV", "VA") for _m, t in pairs[1:]):
+        return WordInfo(flag, word, "other")
+    # 단어 끝에 붙은 조사(J*)를 원래 어절에서 떼어 알맹이를 얻는다 — 분석기가 알맹이를
+    # 이상하게 쪼개도(동방/신기) 어절 자체는 그대로 보존된다.
+    tail = ""
+    for m, t in reversed(pairs):
+        if t.startswith("J"):
+            tail = m + tail
+        else:
+            break
+    stem = word[: -len(tail)] if tail and word.endswith(tail) and len(word) > len(tail) else word
+    if tail == "만" and len(stem) <= 2:   # '이수만'처럼 이름의 일부일 수 있는 한 글자 조사
+        stem = word
+    return WordInfo(flag, stem, kind)
+
+
+def analyze_lines_full(lines: List[str]) -> Optional[List[Optional[List[WordInfo]]]]:
+    """analyze_lines 와 같지만 어절별 알맹이(stem)와 종류(kind)까지 돌려줍니다."""
+    return _analyze(lines)
+
+
 def analyze_lines(lines: List[str]) -> Optional[List[Optional[List[bool]]]]:
     """줄마다 형태소 분석해 어절별 '이 어절 뒤에서 끊기 좋다' 여부를 돌려줍니다.
 
@@ -64,6 +128,13 @@ def analyze_lines(lines: List[str]) -> Optional[List[Optional[List[bool]]]]:
     bool 리스트, 단 분석기가 그 줄을 다른 개수의 어절로 쪼갰다면(정렬이
     어긋나므로) 그 줄은 None. 분석기 자체를 못 쓰면 전체 None.
     """
+    full = _analyze(lines)
+    if full is None:
+        return None
+    return [None if r is None else [w.flag for w in r] for r in full]
+
+
+def _analyze(lines: List[str]) -> Optional[List[Optional[List[WordInfo]]]]:
     java = _find_java()
     if not java or not _JAR_PATH.exists() or not (_DRIVER_DIR / "BreakAnalyzer.class").exists():
         return None
@@ -96,10 +167,32 @@ def analyze_lines(lines: List[str]) -> Optional[List[Optional[List[bool]]]]:
                 inp=shlex.quote(str(in_path)),
                 outp=shlex.quote(str(out_path)),
             )
+            # 끝났는지는 출력 파일의 ###END### 개수로 직접 봅니다(줄마다 정확히 하나).
+            # 다 쓰였으면 안 죽는 JVM을 바로 죽여서, 항상 최대 시간(90초)을 기다리던
+            # 것을 분석이 끝나는 즉시(보통 10~30초)로 줄입니다.
+            proc = subprocess.Popen(["/bin/bash", "-c", shell_cmd], start_new_session=True)
+            deadline = time.time() + 90
             try:
-                subprocess.run(["/bin/bash", "-c", shell_cmd], timeout=90)
-            except subprocess.TimeoutExpired:
-                pass
+                while time.time() < deadline:
+                    if proc.poll() is not None:
+                        break
+                    try:
+                        done = out_path.read_text(encoding="utf-8", errors="replace").count("###END###")
+                    except OSError:
+                        done = 0
+                    if done >= len(lines):
+                        break
+                    time.sleep(0.25)
+            finally:
+                if proc.poll() is None:
+                    try:
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.SubprocessError:
+                    pass
             stdout_text = out_path.read_text(encoding="utf-8", errors="replace")
     except (OSError, subprocess.SubprocessError):
         return None
@@ -115,7 +208,7 @@ def analyze_lines(lines: List[str]) -> Optional[List[Optional[List[bool]]]]:
             continue
         if raw == "###SENT###" or raw.startswith("###ERR###"):
             continue
-        if raw.count("\t") == 3:
+        if raw.count("\t") >= 3:
             current.append(raw)
     # 마지막 ###END### 가 없었다면(비정상 종료) 남은 것도 버리지 않고 받아줌
     if current:
@@ -124,16 +217,16 @@ def analyze_lines(lines: List[str]) -> Optional[List[Optional[List[bool]]]]:
     if len(blocks) != len(lines):
         return None
 
-    results: List[Optional[List[bool]]] = []
+    results: List[Optional[List[WordInfo]]] = []
     for line, block in zip(lines, blocks):
         expected = line.split()
         if len(block) != len(expected):
             results.append(None)
             continue
-        flags = []
+        infos: List[WordInfo] = []
         for row in block:
-            _word, _morph, tag, raw_tag = row.split("\t")
-            t = tag or raw_tag
-            flags.append(t in _BREAK_EXACT or any(t.startswith(p) for p in _BREAK_PREFIXES))
-        results.append(flags)
+            cols = row.split("\t")
+            word, tag = cols[0], (cols[2] or cols[3])
+            infos.append(_word_info(word, tag, cols[4] if len(cols) > 4 else ""))
+        results.append(infos)
     return results

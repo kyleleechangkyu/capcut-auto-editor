@@ -144,6 +144,18 @@ select,input[type=text]{
 select:focus,input:focus{outline:0;box-shadow:0 0 0 2px rgba(0,153,255,.45)}
 select{cursor:pointer}
 
+textarea{font-family:inherit;font-size:13px;letter-spacing:-0.13px;line-height:1.5;
+  background:var(--canvas);color:var(--ink);border:0;border-radius:var(--r-md);
+  padding:11px 14px;width:100%;min-height:96px;resize:vertical}
+textarea:focus{outline:0;box-shadow:0 0 0 2px rgba(0,153,255,.45)}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--ink);
+  letter-spacing:-0.14px;cursor:pointer;margin-right:var(--s-md)}
+.chk input{accent-color:var(--primary);width:16px;height:16px}
+.sl-box{padding:var(--s-sm) 0 var(--s-md)}
+.sl-box .actions{display:flex;align-items:center;gap:var(--s-md);margin-top:var(--s-sm)}
+.sl-sum{margin-top:var(--s-sm);color:var(--ink-muted);font-size:13px;font-weight:500;
+  letter-spacing:-0.13px;line-height:1.7}
+.sl-sum b{color:var(--ink);font-weight:500}
 details.more{border-top:1px solid var(--hairline-soft);margin-top:var(--s-xs)}
 details.more > summary{cursor:pointer;list-style:none;color:var(--ink-muted);
   font-size:13px;font-weight:500;letter-spacing:-0.13px;padding:var(--s-md) 0 var(--s-xs)}
@@ -320,6 +332,31 @@ td.d{color:var(--ink-muted);font-weight:400}
         </div>
         <select id="seed"></select>
       </div>
+      <div class="row">
+        <div>
+          <div class="lab">레퍼런스 패턴 반영</div>
+          <div class="hint" id="sl-hint">내가 마무리한 편집의 키워드 자막·효과음·컷 기준을 따라 합니다</div>
+        </div>
+        <div class="seg" id="seg-sl"><button data-sl="0">끄기</button><button data-sl="1">켜기</button></div>
+      </div>
+      <details class="more" id="sl-more">
+        <summary>레퍼런스 패턴 설정 · 분석</summary>
+        <div class="sl-box">
+          <div class="hint" style="max-width:none;display:block;margin-bottom:var(--s-xs)">
+            레퍼런스 영상(mp4) 경로를 한 줄에 하나씩 적으면, 같은 이름의 CapCut 프로젝트에서 키워드 자막·효과음·컷 기준을 읽습니다</div>
+          <textarea id="sl-refs" placeholder="/Users/…/아웃풋/영상이름.mp4" spellcheck="false"></textarea>
+          <div class="actions">
+            <button class="btn-secondary" id="sl-analyze">패턴 분석</button>
+            <span class="hint" id="sl-status" style="margin:0"></span>
+          </div>
+          <div class="sl-sum" id="sl-sum"></div>
+          <div style="margin-top:var(--s-sm)">
+            <label class="chk"><input type="checkbox" id="sl-kw"> 키워드 자막</label>
+            <label class="chk"><input type="checkbox" id="sl-sfx"> 효과음</label>
+            <label class="chk"><input type="checkbox" id="sl-cut"> 컷 기준</label>
+          </div>
+        </div>
+      </details>
 
       <details class="more">
         <summary>세부 설정</summary>
@@ -391,6 +428,11 @@ td.d{color:var(--ink-muted);font-weight:400}
       </table>
     </div>
 
+    <div class="card hidden" id="kw-card">
+      <div class="section-title" id="kw-title">키워드 자막</div>
+      <div class="cues" id="kws"></div>
+    </div>
+
     <div class="card">
       <div class="section-title">자막 미리보기</div>
       <div class="cues" id="cues"></div>
@@ -447,6 +489,38 @@ async function boot(){
   renderSeeds();
   $("#prompt").value = STATE.transcribe_prompt || "";
   renderFont();
+  renderSL();
+}
+
+function slSummary(pr, skipped){
+  if(!pr || !pr.ready) return "아직 분석한 패턴이 없습니다.";
+  const kw = pr.keyword || {}, sfx = pr.sfx || {}, br = pr.broll || {}, cut = pr.cut || {};
+  const rows = [
+    `<b>프로젝트 ${pr.sources.length}개</b> 분석: ${pr.sources.map(x => x.name).join(", ")}`,
+    `키워드 자막 <b>분당 ${kw.per_min}개</b> · 평균 ${kw.median_chars}자 · 길이 ${kw.avg_duration}초 · 스타일 <b>${kw.preset_name || "(맞는 사전 설정 없음)"}</b>`,
+    `효과음 <b>분당 ${sfx.per_min}개</b> · ${(sfx.names || []).join(", ")}`,
+    `B-roll 분당 ${br.per_min}곳 · 평균 ${br.avg_duration}초 (자동으로 넣진 않고 후보 자리만 표시)`,
+    cut.min_clip ? `컷: 0.5초 미만 조각의 <b>${Math.round((cut.short_clip_removed_rate||0)*100)}%</b>를 직접 지워서 최소 클립 길이 <b>${cut.min_clip}초</b>로 반영`
+                 : `컷: 지운 짧은 조각이 ${Math.round((cut.short_clip_removed_rate||0)*100)}%라 기준은 바꾸지 않음`,
+  ];
+  if(skipped && skipped.length)
+    rows.push(`읽지 못함: ${skipped.map(x => x.path.split("/").pop()).join(", ")} — 같은 이름의 CapCut 프로젝트가 없음`);
+  return rows.join("<br>");
+}
+
+function renderSL(){
+  const sl = STATE.style_learning || {};
+  $("#seg-sl").querySelectorAll("button").forEach(b =>
+    b.classList.toggle("on", (b.dataset.sl === "1") === !!sl.enabled));
+  $("#sl-refs").value = (sl.references || []).join("\n");
+  $("#sl-kw").checked = sl.keywords !== false;
+  $("#sl-sfx").checked = sl.sfx !== false;
+  $("#sl-cut").checked = sl.cut !== false;
+  $("#sl-sum").innerHTML = slSummary(STATE.style_profile);
+  const ready = STATE.style_profile && STATE.style_profile.ready;
+  $("#sl-hint").textContent = sl.enabled && !ready
+    ? "켜져 있지만 분석한 패턴이 없습니다 — 아래에서 '패턴 분석'을 먼저 해주세요"
+    : "내가 마무리한 편집의 키워드 자막·효과음·컷 기준을 따라 합니다";
 }
 
 const escAttr = s => String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");
@@ -522,6 +596,44 @@ let pt;
 $("#prompt").addEventListener("input", () => {
   clearTimeout(pt);
   pt = setTimeout(() => save({transcribe:{initial_prompt: $("#prompt").value}}), 500);
+});
+
+$("#seg-sl").addEventListener("click", e => {
+  const b = e.target.closest("button[data-sl]");
+  if(!b) return;
+  STATE.style_learning = Object.assign({}, STATE.style_learning, {enabled: b.dataset.sl === "1"});
+  save({style_learning: {enabled: b.dataset.sl === "1"}});
+  renderSL();
+  if(b.dataset.sl === "1") $("#sl-more").open = true;
+});
+for(const [id, key] of [["#sl-kw","keywords"],["#sl-sfx","sfx"],["#sl-cut","cut"]])
+  $(id).addEventListener("change", () => {
+    STATE.style_learning = Object.assign({}, STATE.style_learning, {[key]: $(id).checked});
+    save({style_learning: {[key]: $(id).checked}});
+  });
+let slt;
+$("#sl-refs").addEventListener("input", () => {
+  clearTimeout(slt);
+  slt = setTimeout(() => save({style_learning:{references: $("#sl-refs").value.split("\n").map(x => x.trim()).filter(Boolean)}}), 500);
+});
+$("#sl-analyze").addEventListener("click", async () => {
+  const refs = $("#sl-refs").value.split("\n").map(x => x.trim()).filter(Boolean);
+  const btn = $("#sl-analyze"), st = $("#sl-status");
+  btn.disabled = true; st.textContent = "분석 중…";
+  try{
+    const r = await api("/api/style/analyze", {method:"POST",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify({references: refs})});
+    if(r.ok){
+      STATE.style_profile = r.profile;
+      st.textContent = "분석 완료";
+      $("#sl-sum").innerHTML = slSummary(r.profile, r.skipped);
+    } else {
+      st.textContent = r.message || "분석하지 못했습니다";
+      if(r.skipped && r.skipped.length) $("#sl-sum").innerHTML = slSummary(STATE.style_profile, r.skipped);
+    }
+  }catch(err){ st.textContent = "분석 중 오류가 났습니다"; }
+  btn.disabled = false;
+  renderSL();
 });
 
 $("#font").addEventListener("change", () => {
@@ -684,6 +796,14 @@ function done(r){
     <td class="d">${c.detail || ""}</td></tr>`).join("")
     : `<tr><td class="d">잘라낼 곳이 없었습니다</td></tr>`;
 
+  const kwCard = $("#kw-card");
+  if(r.keywords && r.keywords.length){
+    kwCard.classList.remove("hidden");
+    $("#kw-title").textContent =
+      `키워드 자막 ${r.keywords.length}개 · 효과음 ${r.sfx_count || 0}개 — ★ 는 사진·영상(B-roll)을 얹기 좋은 자리`;
+    $("#kws").innerHTML = r.keywords.map(k =>
+      `<div class="cue"><span>${mmss(k.start)}</span><div>${k.tier ? "★ " : ""}${k.text}</div></div>`).join("");
+  } else { kwCard.classList.add("hidden"); }
   $("#cues").innerHTML = r.cues.map(c =>
     `<div class="cue"><span>${mmss(c.start)}</span><div>${c.text}</div></div>`).join("");
 
