@@ -233,7 +233,7 @@ pycapcut 이 만든 영상 재료엔 `is_set_beauty_mode` 등이 없어서, CapC
 `bold_width`(0.00800000037997961), 세로/가로 크기 = 세그먼트 `clip.scale` +
 `uniform_scale`, 위치 = `clip.transform`, 글로우 = `bloom` 이펙트 재료 +
 `extra_material_refs`, 그림자 `diffuse = smoothing/18`, `check_flag = 7 | 테두리 8 |
-그림자·굵게 32 | 글로우 64`. 말풍선/꽃 효과/곡선/배경 프레임은 대응을 못 찾아
+그림자·굵게 32 | 글로우 64`(배경 16 추가), 텍스트 배경 = `frame_*` → `background_*`(색·투명도·스타일·가로세로·오프셋, `use_effect_default_color=False`). 말풍선/꽃 효과/곡선은 대응을 못 찾아
 적용하지 않고 `apply_preset_style()` 반환값으로 알려줍니다(로그에 표시).
 새 속성을 추가할 땐 같은 방식으로 네이티브 초안과 먼저 대조하세요.
 
